@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 WiFi Arsenal Pro - Ultimate WiFi Security Auditing Platform
-A fully automated, real implementation with all dependencies handled
+Fully automated, real implementation with all dependencies handled
 """
 
 import os
@@ -25,9 +25,10 @@ from pathlib import Path
 import webbrowser
 import tempfile
 import hashlib
+import urllib.request
 
 # Constants
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 AUTHOR = "0x0806"
 REQUIRED_TOOLS = ['aircrack-ng', 'airodump-ng', 'aireplay-ng', 'wash', 'reaver', 'bully', 'hashcat', 'tshark']
 WORDLIST_URLS = [
@@ -118,15 +119,17 @@ class DependencyManager:
             filename = os.path.join(wordlist_dir, os.path.basename(url))
             if not os.path.exists(filename):
                 try:
-                    subprocess.run(['wget', '-O', filename, url], check=True)
-                except:
-                    print(f"Failed to download {url}")
+                    urllib.request.urlretrieve(url, filename)
+                    print(f"Downloaded {filename}")
+                except Exception as e:
+                    print(f"Failed to download {url}: {e}")
         
         # Create basic wordlist if downloads failed
         basic_wordlist = os.path.join(wordlist_dir, "basic_wordlist.txt")
         if not os.path.exists(basic_wordlist):
             with open(basic_wordlist, 'w') as f:
                 f.write("password\n123456\nadmin\nwifi\n12345678\nqwerty\n")
+            print(f"Created basic wordlist at {basic_wordlist}")
 
 class WiFiScanner:
     """Handles all WiFi scanning operations"""
@@ -224,7 +227,7 @@ class WiFiScanner:
                     time.sleep(1)
                     continue
                 
-                with open(f"{self.temp_file.name[:-4]}-01.csv", 'r') as f:
+                with open(f"{self.temp_file.name[:-4]}-01.csv", 'r', errors='ignore') as f:
                     content = f.read()
                 
                 self.targets = []
@@ -1209,14 +1212,12 @@ Clients: {len(self.selected_target['clients'])}
                     self.selected_target['bssid'],
                     self.selected_target['channel'],
                     lambda msg: self.queue.put(('attack_log', msg))
-                )
             elif attack_type == 'handshake':
                 result = self.attacker.attack_wpa_handshake(
                     self.selected_target['bssid'],
                     self.selected_target['channel'],
                     self.selected_target['essid'] if self.selected_target['essid'] != 'Hidden' else None,
                     lambda msg: self.queue.put(('attack_log', msg))
-                )
                 
                 if result and result['success']:
                     # Save handshake to database
@@ -1232,14 +1233,12 @@ Clients: {len(self.selected_target['clients'])}
                     self.selected_target['bssid'],
                     self.selected_target['channel'],
                     lambda msg: self.queue.put(('attack_log', msg))
-                )
             elif attack_type == 'deauth':
                 result = self.attacker.deauth_attack(
                     self.selected_target['bssid'],
                     None,  # Broadcast deauth
                     10,    # 10 packets
                     lambda msg: self.queue.put(('attack_log', msg))
-                )
             
             duration = time.time() - start_time
             
