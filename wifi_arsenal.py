@@ -31,20 +31,26 @@ try:
 except ImportError as e:
     print(f"[!] Missing required module: {e}")
     print("[*] Installing dependencies...")
-    subprocess.run([sys.executable, '-m', 'pip', 'install', 'scapy', 'psutil', 'requests', 'colorama'])
     try:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'scapy', 'psutil', 'requests', 'colorama'], 
+                      check=True, capture_output=True)
         from scapy.all import *
         import psutil
         import requests
         from colorama import init, Fore, Back, Style
         init()
-    except ImportError:
-        print("[!] Failed to install dependencies. Some features may not work.")
+        print("[+] Dependencies installed successfully")
+    except (subprocess.CalledProcessError, ImportError) as install_error:
+        print(f"[!] Failed to install dependencies: {install_error}")
+        print("[*] Continuing with limited functionality...")
         # Fallback for missing colorama
         class MockColor:
             def __getattr__(self, name):
                 return ""
-        Fore = Back = Style = MockColor()
+        try:
+            Fore = Back = Style = MockColor()
+        except:
+            pass
 
 class WiFiArsenal:
     def __init__(self):
@@ -149,11 +155,22 @@ class WiFiArsenal:
     def command_exists(self, command):
         """Check if command exists"""
         try:
-            return subprocess.call(['which', command], 
-                                 stdout=subprocess.DEVNULL, 
-                                 stderr=subprocess.DEVNULL) == 0
-        except:
-            return False
+            result = subprocess.run(['which', command], 
+                                  stdout=subprocess.DEVNULL, 
+                                  stderr=subprocess.DEVNULL,
+                                  timeout=5)
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            try:
+                # Fallback: check if command is in PATH
+                result = subprocess.run(['command', '-v', command], 
+                                      shell=True,
+                                      stdout=subprocess.DEVNULL, 
+                                      stderr=subprocess.DEVNULL,
+                                      timeout=5)
+                return result.returncode == 0
+            except:
+                return False
                              
     def get_interfaces(self):
         """Get available network interfaces with enhanced detection"""
@@ -161,35 +178,56 @@ class WiFiArsenal:
         
         # Method 1: Using iwconfig
         try:
-            result = subprocess.run(['iwconfig'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'IEEE 802.11' in line:
-                    interface = line.split()[0]
-                    interfaces.append(interface)
-        except:
+            if self.command_exists('iwconfig'):
+                result = subprocess.run(['iwconfig'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'IEEE 802.11' in line:
+                            interface = line.split()[0]
+                            if interface and interface not in interfaces:
+                                interfaces.append(interface)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
             
         # Method 2: Using /proc/net/wireless
         try:
-            with open('/proc/net/wireless', 'r') as f:
-                lines = f.readlines()[2:]  # Skip headers
-                for line in lines:
-                    if line.strip():
-                        interface = line.split(':')[0].strip()
-                        if interface not in interfaces:
-                            interfaces.append(interface)
-        except:
+            if os.path.exists('/proc/net/wireless'):
+                with open('/proc/net/wireless', 'r') as f:
+                    lines = f.readlines()[2:]  # Skip headers
+                    for line in lines:
+                        if line.strip():
+                            interface = line.split(':')[0].strip()
+                            if interface and interface not in interfaces:
+                                interfaces.append(interface)
+        except (IOError, OSError):
             pass
             
-        # Method 3: Using network namespaces
+        # Method 3: Using ip command
         try:
-            result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'wlan' in line or 'wlp' in line:
-                    interface = line.split(':')[1].strip().split('@')[0]
-                    if interface not in interfaces:
-                        interfaces.append(interface)
-        except:
+            if self.command_exists('ip'):
+                result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if ('wlan' in line or 'wlp' in line or 'wifi' in line) and ':' in line:
+                            parts = line.split(':')
+                            if len(parts) >= 2:
+                                interface = parts[1].strip().split('@')[0]
+                                if interface and interface not in interfaces:
+                                    interfaces.append(interface)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+            
+        # Method 4: Using ls /sys/class/net/
+        try:
+            net_path = '/sys/class/net/'
+            if os.path.exists(net_path):
+                for iface in os.listdir(net_path):
+                    if ('wlan' in iface or 'wlp' in iface or 'wifi' in iface) and iface not in interfaces:
+                        # Check if it's a wireless interface
+                        wireless_path = os.path.join(net_path, iface, 'wireless')
+                        if os.path.exists(wireless_path):
+                            interfaces.append(iface)
+        except (OSError, IOError):
             pass
             
         return list(set(interfaces))  # Remove duplicates
@@ -201,21 +239,24 @@ class WiFiArsenal:
         
         # Method 1: Using airmon-ng
         try:
-            # Kill interfering processes
-            subprocess.run(['airmon-ng', 'check', 'kill'], 
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Start monitor mode
-            result = subprocess.run(['airmon-ng', 'start', interface], 
-                                   capture_output=True, text=True)
-            
-            # Extract monitor interface name
-            for line in result.stdout.split('\n'):
-                if 'monitor mode enabled' in line.lower():
-                    self.monitor_interface = line.split()[-1].rstrip(')')
-                    print(f"{Fore.GREEN}[+] Monitor mode enabled on {self.monitor_interface}{Style.RESET_ALL}")
-                    return True
-        except:
+            if self.command_exists('airmon-ng'):
+                # Kill interfering processes
+                subprocess.run(['airmon-ng', 'check', 'kill'], 
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                
+                # Start monitor mode
+                result = subprocess.run(['airmon-ng', 'start', interface], 
+                                       capture_output=True, text=True, timeout=30)
+                
+                # Extract monitor interface name
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'monitor mode enabled' in line.lower():
+                            self.monitor_interface = line.split()[-1].rstrip(')')
+                            print(f"{Fore.GREEN}[+] Monitor mode enabled on {self.monitor_interface}{Style.RESET_ALL}")
+                            return True
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            print(f"{Fore.YELLOW}[*] airmon-ng method failed: {e}{Style.RESET_ALL}")
             pass
             
         # Method 2: Manual setup using iw
@@ -1960,10 +2001,19 @@ address=/#/192.168.1.1
         self.banner()
         
         # Check if running as root
-        if os.geteuid() != 0:
-            print(f"{Fore.RED}[!] This tool requires root privileges")
-            print(f"[*] Please run with: sudo python3 wifi_arsenal.py{Style.RESET_ALL}")
-            sys.exit(1)
+        try:
+            if os.geteuid() != 0:
+                print(f"{Fore.RED}[!] This tool requires root privileges")
+                print(f"[*] Please run with: sudo python3 wifi_arsenal.py{Style.RESET_ALL}")
+                print(f"[*] Note: On Replit, some features may be limited due to container restrictions")
+                response = input(f"{Fore.YELLOW}[?] Continue anyway? (y/N): {Style.RESET_ALL}").strip().lower()
+                if response != 'y':
+                    sys.exit(1)
+                else:
+                    print(f"{Fore.YELLOW}[*] Continuing with limited privileges...{Style.RESET_ALL}")
+        except AttributeError:
+            # os.geteuid() not available on some systems
+            print(f"{Fore.YELLOW}[*] Cannot check root privileges, continuing...{Style.RESET_ALL}")
             
         # Check dependencies
         if not self.check_dependencies():
