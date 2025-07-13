@@ -1,0 +1,6 @@
+
+scapy>=2.4.3
+psutil>=5.8.0
+requests>=2.25.1
+colorama>=0.4.4
+cryptography>=3.4.8
