@@ -1,9 +1,8 @@
 
 #!/usr/bin/env python3
 """
-WiFi Arsenal - Ultimate WiFi Penetration Testing Tool
+WiFi Arsenal -  WiFi Penetration Testing Tool
 Developed by 0x0806
-Production Ready - No Mock, Full Real WiFi Capabilities
 """
 
 import subprocess
@@ -101,7 +100,7 @@ class WiFiArsenal:
 
 {Fore.YELLOW}╔══════════════════════════════════════════════════════════════════════════════════╗
 ║     WiFi Penetration Testing Suite                   ║
-║     Developed by 0x0806                              ║
+║     Developed by GitHub.com/0x0806                   ║
 ║     Version {self.version}                           ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
