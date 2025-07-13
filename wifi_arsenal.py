@@ -876,7 +876,7 @@ class ArsenalScanner:
             client_mac = fields[0]
             bssid = fields[5] if len(fields) > 5 else ""
             power = int(fields[3]) if len(fields) > 3 and fields[3].lstrip('-').isdigit() else -100
-            packets = int(fields[4]) if len(fields > 4 and fields[4].isdigit() else 0
+            packets = int(fields[4]) if len(fields) > 4 and fields[4].isdigit() else 0
 
             if not re.match(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$', client_mac):
                 return
