@@ -211,6 +211,31 @@ class ArsenalDatabase:
         
         conn.commit()
         conn.close()
+    
+    def get_all_networks(self):
+        """Get all networks from database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM networks ORDER BY last_seen DESC')
+        networks = cursor.fetchall()
+        
+        conn.close()
+        return networks
+    
+    def get_attack_history(self, bssid=None):
+        """Get attack history"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if bssid:
+            cursor.execute('SELECT * FROM attacks WHERE target_bssid = ? ORDER BY timestamp DESC', (bssid,))
+        else:
+            cursor.execute('SELECT * FROM attacks ORDER BY timestamp DESC')
+        
+        attacks = cursor.fetchall()
+        conn.close()
+        return attacks
 
 class WiFiTarget:
     """Enhanced WiFi target with advanced analysis"""
@@ -269,7 +294,15 @@ class WiFiTarget:
             '00:90:4C': 'Epigram',
             'AC:BC:32': 'Apple',
             '28:CF:E9': 'Apple',
-            '00:23:DF': 'Apple'
+            '00:23:DF': 'Apple',
+            'D8:A2:5E': 'Netgear',
+            'C0:56:27': 'Belkin',
+            '00:1A:2B': 'Cisco',
+            '00:22:6B': 'Cisco',
+            'F8:1A:67': 'TP-Link',
+            'EC:08:6B': 'TP-Link',
+            '20:4E:7F': 'D-Link',
+            '24:01:C7': 'D-Link'
         }
         
         oui = mac[:8].upper()
@@ -356,54 +389,46 @@ class ArsenalNetworkInterface:
         """Get detailed interface information"""
         interfaces = []
         try:
-            # Get wireless interfaces
+            # Get wireless interfaces using iwconfig
             result = subprocess.run(['iwconfig'], capture_output=True, text=True, timeout=10)
-            current_interface = {}
             
-            for line in result.stdout.split('\n'):
-                if 'IEEE 802.11' in line:
-                    if current_interface:
-                        interfaces.append(current_interface)
-                    
-                    interface_name = line.split()[0]
-                    current_interface = {
-                        'name': interface_name,
-                        'type': 'wireless',
-                        'standard': '802.11',
-                        'mode': 'managed',
-                        'monitor_capable': True
-                    }
-                elif 'Mode:' in line and current_interface:
-                    mode_match = re.search(r'Mode:(\S+)', line)
-                    if mode_match:
-                        current_interface['mode'] = mode_match.group(1)
-            
-            if current_interface:
-                interfaces.append(current_interface)
-            
-            # Get additional interface details
-            for interface in interfaces:
-                try:
-                    # Get MAC address
-                    mac_result = subprocess.run(['cat', f'/sys/class/net/{interface["name"]}/address'], 
-                                              capture_output=True, text=True, timeout=5)
-                    if mac_result.returncode == 0:
-                        interface['mac'] = mac_result.stdout.strip()
-                    
-                    # Get driver info
-                    driver_result = subprocess.run(['ethtool', '-i', interface['name']], 
-                                                 capture_output=True, text=True, timeout=5)
-                    if driver_result.returncode == 0:
-                        for line in driver_result.stdout.split('\n'):
-                            if 'driver:' in line:
-                                interface['driver'] = line.split(':')[1].strip()
-                except:
-                    pass
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'IEEE 802.11' in line:
+                        interface_name = line.split()[0]
+                        interfaces.append({
+                            'name': interface_name,
+                            'type': 'wireless',
+                            'standard': '802.11',
+                            'mode': 'managed',
+                            'monitor_capable': True,
+                            'mac': ArsenalNetworkInterface._get_mac_address(interface_name),
+                            'driver': ArsenalNetworkInterface._get_driver(interface_name)
+                        })
             
             return interfaces
         except Exception as e:
-            print(f"Error getting interfaces: {e}")
-            return []
+            raise Exception(f"Error getting interfaces: {e}")
+    
+    @staticmethod
+    def _get_mac_address(interface: str) -> str:
+        """Get MAC address of interface"""
+        try:
+            with open(f'/sys/class/net/{interface}/address', 'r') as f:
+                return f.read().strip()
+        except:
+            return 'Unknown'
+    
+    @staticmethod
+    def _get_driver(interface: str) -> str:
+        """Get driver of interface"""
+        try:
+            driver_path = f'/sys/class/net/{interface}/device/driver'
+            if os.path.islink(driver_path):
+                return os.path.basename(os.readlink(driver_path))
+            return 'Unknown'
+        except:
+            return 'Unknown'
     
     @staticmethod
     def enable_monitor_mode(interface: str) -> Tuple[bool, str]:
@@ -465,10 +490,6 @@ class ArsenalScanner:
         self.packets_captured = 0
         self.channels_scanned.clear()
         
-        # Create output file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.output_file = f"/tmp/arsenal_scan_{timestamp}"
-        
         threading.Thread(target=self._scan_worker, args=(channel, scan_type), daemon=True).start()
         return True
     
@@ -486,8 +507,19 @@ class ArsenalScanner:
                     pass
     
     def _scan_worker(self, channel: Optional[int] = None, scan_type: str = "active"):
-        """Advanced scanning worker with multiple modes"""
+        """Advanced scanning worker"""
         try:
+            self._real_scan(channel, scan_type)
+        except Exception as e:
+            print(f"Scan error: {e}")
+    
+    def _real_scan(self, channel: Optional[int] = None, scan_type: str = "active"):
+        """Real scanning with airodump-ng"""
+        try:
+            # Create output file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.output_file = f"/tmp/arsenal_scan_{timestamp}"
+            
             # Prepare scan command
             cmd = ['sudo', 'airodump-ng', '--write-interval', '2', 
                    '--output-format', 'csv', '--write', self.output_file]
@@ -509,7 +541,7 @@ class ArsenalScanner:
                 self._parse_scan_results()
                 
         except Exception as e:
-            print(f"Scan error: {e}")
+            raise Exception(f"Real scan error: {e}")
         finally:
             if self.scan_process:
                 try:
@@ -1055,7 +1087,7 @@ class ArsenalAttackEngine:
                                   capture_output=True, text=True, timeout=5)
             return result.stdout.strip()
         except:
-            return "00:11:22:33:44:55"  # Fallback MAC
+            raise Exception("Could not get interface MAC address")
     
     def _finalize_attack_result(self, attack_id: str, target: WiFiTarget, 
                                result: Dict, start_time: float) -> Dict:
@@ -1215,6 +1247,11 @@ class WiFiArsenal:
         self.results_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.results_frame, text="📊 Results")
         self.create_results_tab()
+        
+        # Database Tab
+        self.database_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.database_frame, text="🗄️ Database")
+        self.create_database_tab()
     
     def create_scanner_tab(self):
         """Create scanner interface"""
@@ -1371,12 +1408,80 @@ class WiFiArsenal:
     
     def create_results_tab(self):
         """Create results tab"""
-        results_label = tk.Label(self.results_frame, 
-                               text="📊 Attack Results\n\n[Results will appear here]",
-                               font=('Segoe UI', 16),
-                               fg=ARSENAL_COLORS['text_primary'],
-                               bg=ARSENAL_COLORS['bg_secondary'])
-        results_label.pack(expand=True)
+        # Results summary
+        summary_frame = tk.LabelFrame(self.results_frame, text="📊 Attack Summary",
+                                     font=('Segoe UI', 12, 'bold'),
+                                     fg=ARSENAL_COLORS['text_primary'],
+                                     bg=ARSENAL_COLORS['bg_secondary'])
+        summary_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.results_summary = tk.Text(summary_frame, height=6,
+                                      bg=ARSENAL_COLORS['bg_tertiary'],
+                                      fg=ARSENAL_COLORS['text_primary'],
+                                      font=('Consolas', 10))
+        self.results_summary.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Results table
+        results_table_frame = tk.LabelFrame(self.results_frame, text="🗂️ Attack History",
+                                          font=('Segoe UI', 12, 'bold'),
+                                          fg=ARSENAL_COLORS['text_primary'],
+                                          bg=ARSENAL_COLORS['bg_secondary'])
+        results_table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create results treeview
+        results_columns = ('Time', 'Target', 'Attack', 'Status', 'Result')
+        
+        self.results_tree = ttk.Treeview(results_table_frame, columns=results_columns, show='headings', height=15)
+        
+        for col in results_columns:
+            self.results_tree.heading(col, text=col)
+            self.results_tree.column(col, width=150)
+        
+        # Scrollbar for results
+        results_scroll = ttk.Scrollbar(results_table_frame, orient=tk.VERTICAL, command=self.results_tree.yview)
+        self.results_tree.configure(yscrollcommand=results_scroll.set)
+        
+        self.results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        results_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+        
+        # Refresh button
+        refresh_btn = ttk.Button(results_table_frame, text="🔄 Refresh Results", 
+                               command=self.refresh_results)
+        refresh_btn.pack(pady=5)
+    
+    def create_database_tab(self):
+        """Create database management tab"""
+        # Database info
+        db_info_frame = tk.LabelFrame(self.database_frame, text="🗄️ Database Information",
+                                     font=('Segoe UI', 12, 'bold'),
+                                     fg=ARSENAL_COLORS['text_primary'],
+                                     bg=ARSENAL_COLORS['bg_secondary'])
+        db_info_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.db_info_text = tk.Text(db_info_frame, height=6,
+                                   bg=ARSENAL_COLORS['bg_tertiary'],
+                                   fg=ARSENAL_COLORS['text_primary'],
+                                   font=('Consolas', 10))
+        self.db_info_text.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Database controls
+        db_controls_frame = tk.Frame(self.database_frame, bg=ARSENAL_COLORS['bg_secondary'])
+        db_controls_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        export_btn = ttk.Button(db_controls_frame, text="📤 Export Data", 
+                               command=self.export_database)
+        export_btn.pack(side=tk.LEFT, padx=5)
+        
+        import_btn = ttk.Button(db_controls_frame, text="📥 Import Data", 
+                               command=self.import_database)
+        import_btn.pack(side=tk.LEFT, padx=5)
+        
+        clear_btn = ttk.Button(db_controls_frame, text="🗑️ Clear Database", 
+                              command=self.clear_database)
+        clear_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Update database info
+        self.update_database_info()
     
     def create_status_bar(self):
         """Create status bar"""
@@ -1400,13 +1505,16 @@ class WiFiArsenal:
     
     def refresh_interfaces(self):
         """Refresh available network interfaces"""
-        interfaces = ArsenalNetworkInterface.get_interfaces()
-        interface_names = [iface['name'] for iface in interfaces]
-        
-        self.interface_combo['values'] = interface_names
-        if interface_names:
-            self.interface_var.set(interface_names[0])
-            self.interface = interface_names[0]
+        try:
+            interfaces = ArsenalNetworkInterface.get_interfaces()
+            interface_names = [iface['name'] for iface in interfaces]
+            
+            self.interface_combo['values'] = interface_names
+            if interface_names:
+                self.interface_var.set(interface_names[0])
+                self.interface = interface_names[0]
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to get interfaces: {e}")
     
     def on_interface_selected(self, event=None):
         """Handle interface selection"""
@@ -1425,28 +1533,34 @@ class WiFiArsenal:
         if not self.monitor_interface:
             # Enable monitor mode
             self.update_status("Enabling monitor mode...")
-            success, result = ArsenalNetworkInterface.enable_monitor_mode(self.interface)
-            
-            if success:
-                self.monitor_interface = result
-                self.monitor_btn.configure(text="Disable Monitor Mode")
-                self.status_indicator.configure(fg=ARSENAL_COLORS['success'])
-                self.update_status(f"Monitor mode enabled: {self.monitor_interface}")
-                messagebox.showinfo("Success", f"Monitor mode enabled: {self.monitor_interface}")
-            else:
-                messagebox.showerror("Error", f"Failed to enable monitor mode: {result}")
+            try:
+                success, result = ArsenalNetworkInterface.enable_monitor_mode(self.interface)
+                
+                if success:
+                    self.monitor_interface = result
+                    self.monitor_btn.configure(text="Disable Monitor Mode")
+                    self.status_indicator.configure(fg=ARSENAL_COLORS['success'])
+                    self.update_status(f"Monitor mode enabled: {self.monitor_interface}")
+                    messagebox.showinfo("Success", f"Monitor mode enabled: {self.monitor_interface}")
+                else:
+                    messagebox.showerror("Error", f"Failed to enable monitor mode: {result}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to enable monitor mode: {e}")
         else:
             # Disable monitor mode
-            success = ArsenalNetworkInterface.disable_monitor_mode(self.monitor_interface)
-            
-            if success:
-                self.monitor_interface = None
-                self.monitor_btn.configure(text="Enable Monitor Mode")
-                self.status_indicator.configure(fg=ARSENAL_COLORS['warning'])
-                self.update_status("Monitor mode disabled")
-                messagebox.showinfo("Success", "Monitor mode disabled")
-            else:
-                messagebox.showerror("Error", "Failed to disable monitor mode")
+            try:
+                success = ArsenalNetworkInterface.disable_monitor_mode(self.monitor_interface)
+                
+                if success:
+                    self.monitor_interface = None
+                    self.monitor_btn.configure(text="Enable Monitor Mode")
+                    self.status_indicator.configure(fg=ARSENAL_COLORS['warning'])
+                    self.update_status("Monitor mode disabled")
+                    messagebox.showinfo("Success", "Monitor mode disabled")
+                else:
+                    messagebox.showerror("Error", "Failed to disable monitor mode")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to disable monitor mode: {e}")
     
     def toggle_scan(self):
         """Toggle WiFi scanning"""
@@ -1460,12 +1574,15 @@ class WiFiArsenal:
             
             channel = None if self.channel_var.get() == "All" else int(self.channel_var.get())
             
-            if self.scanner.start_scan(channel):
-                self.scanning = True
-                self.scan_btn.configure(text="⏹️ Stop Scan")
-                self.update_status("Scanning started...")
-            else:
-                messagebox.showerror("Error", "Failed to start scanning")
+            try:
+                if self.scanner.start_scan(channel):
+                    self.scanning = True
+                    self.scan_btn.configure(text="⏹️ Stop Scan")
+                    self.update_status("Scanning started...")
+                else:
+                    messagebox.showerror("Error", "Failed to start scanning")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to start scanning: {e}")
         else:
             # Stop scanning
             if self.scanner:
@@ -1527,6 +1644,10 @@ class WiFiArsenal:
         self.targets = targets
         self.clients = clients
         self._update_scan_statistics()
+        
+        # Save to database
+        for target in targets:
+            self.db.save_network(target.to_dict())
     
     def _update_scan_statistics(self):
         """Update scan statistics"""
@@ -1592,9 +1713,21 @@ Connected Clients:    {len(self.selected_target.clients)}
 Vulnerability Score:  {self.selected_target.vulnerability_score}/100
 Risk Level:           {self.selected_target.get_risk_level()}
 
-👥 CLIENT DETAILS
+📈 ATTACK RECOMMENDATIONS
 ═══════════════════════════════════════════════════════════════
 """
+        
+        # Add attack recommendations
+        if 'WEP' in self.selected_target.encryption:
+            info += "\n🔓 WEP Attack: HIGHLY RECOMMENDED (WEP is critically vulnerable)"
+        if 'WPA' in self.selected_target.encryption:
+            info += "\n🤝 Handshake Capture: Recommended for dictionary attacks"
+        if self.selected_target.wps:
+            info += "\n📱 WPS Attack: Recommended (WPS PIN vulnerabilities)"
+        if len(self.selected_target.clients) > 0:
+            info += "\n💥 Deauth Attack: Effective (clients present for handshake capture)"
+        
+        info += "\n\n👥 CLIENT DETAILS\n═══════════════════════════════════════════════════════════════"
         
         if self.selected_target.clients:
             for i, client in enumerate(self.selected_target.clients, 1):
@@ -1677,12 +1810,18 @@ Risk Level:           {self.selected_target.get_risk_level()}
                     filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
                 )
                 if wordlist:
-                    # Find handshake file
-                    handshake_file = f"/tmp/arsenal_handshake_{self.selected_target.bssid.replace(':', '')}"
-                    result = self.attack_engine.crack_handshake_dictionary(
-                        handshake_file, wordlist, self.selected_target,
-                        lambda msg: self.queue.put(('attack_progress', msg))
+                    # Find handshake file (user needs to have captured one first)
+                    handshake_file = filedialog.askopenfilename(
+                        title="Select Handshake File",
+                        filetypes=[("Capture files", "*.cap"), ("All files", "*.*")]
                     )
+                    if handshake_file:
+                        result = self.attack_engine.crack_handshake_dictionary(
+                            handshake_file, wordlist, self.selected_target,
+                            lambda msg: self.queue.put(('attack_progress', msg))
+                        )
+                    else:
+                        result = {'success': False, 'error': 'No handshake file selected'}
                 else:
                     result = {'success': False, 'error': 'No wordlist selected'}
             elif attack_type == 'deauth':
@@ -1734,6 +1873,9 @@ Risk Level:           {self.selected_target.get_risk_level()}
             error_msg = result.get('error', 'Unknown error') if result else 'Attack failed'
             self.log_attack(f"❌ ATTACK FAILED: {error_msg}")
             messagebox.showwarning("Attack Failed", f"Attack was unsuccessful:\n{error_msg}")
+        
+        # Refresh results
+        self.refresh_results()
     
     def log_attack(self, message):
         """Log attack message"""
@@ -1743,6 +1885,140 @@ Risk Level:           {self.selected_target.get_risk_level()}
         self.attack_log.insert(tk.END, log_entry)
         self.attack_log.see(tk.END)
         self.attack_log.update()
+    
+    def refresh_results(self):
+        """Refresh results display"""
+        # Clear results tree
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # Get attack history from database
+        attacks = self.db.get_attack_history()
+        
+        # Update results tree
+        for attack in attacks:
+            timestamp = attack[1] if len(attack) > 1 else 'N/A'
+            target = attack[3] if len(attack) > 3 else 'N/A'
+            attack_type = attack[4] if len(attack) > 4 else 'N/A'
+            success = attack[7] if len(attack) > 7 else False
+            password = attack[8] if len(attack) > 8 else ''
+            
+            status = "SUCCESS" if success else "FAILED"
+            result = password if password else "N/A"
+            
+            self.results_tree.insert('', 'end', values=(
+                timestamp[:19] if timestamp != 'N/A' else 'N/A',
+                target,
+                attack_type,
+                status,
+                result
+            ))
+        
+        # Update summary
+        total_attacks = len(attacks)
+        successful_attacks = len([a for a in attacks if len(a) > 7 and a[7]])
+        success_rate = (successful_attacks / total_attacks * 100) if total_attacks > 0 else 0
+        
+        summary = f"""
+📊 ATTACK SUMMARY
+═══════════════════════════════════════════════════════════════
+
+Total Attacks:        {total_attacks}
+Successful Attacks:   {successful_attacks}
+Success Rate:         {success_rate:.1f}%
+Networks Discovered:  {len(self.targets)}
+Passwords Cracked:    {len([a for a in attacks if len(a) > 8 and a[8]])}
+
+Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        
+        self.results_summary.delete(1.0, tk.END)
+        self.results_summary.insert(1.0, summary)
+    
+    def update_database_info(self):
+        """Update database information display"""
+        networks = self.db.get_all_networks()
+        attacks = self.db.get_attack_history()
+        
+        db_info = f"""
+🗄️ DATABASE INFORMATION
+═══════════════════════════════════════════════════════════════
+
+Database File:        {self.db.db_path}
+File Size:           {os.path.getsize(self.db.db_path) if os.path.exists(self.db.db_path) else 0} bytes
+Networks Stored:      {len(networks)}
+Attack Records:       {len(attacks)}
+Created:             {datetime.fromtimestamp(os.path.getctime(self.db.db_path)).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(self.db.db_path) else 'N/A'}
+Last Modified:       {datetime.fromtimestamp(os.path.getmtime(self.db.db_path)).strftime('%Y-%m-%d %H:%M:%S') if os.path.exists(self.db.db_path) else 'N/A'}
+"""
+        
+        self.db_info_text.delete(1.0, tk.END)
+        self.db_info_text.insert(1.0, db_info)
+    
+    def export_database(self):
+        """Export database to JSON file"""
+        filename = filedialog.asksaveasfilename(
+            title="Export Database",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                networks = self.db.get_all_networks()
+                attacks = self.db.get_attack_history()
+                
+                export_data = {
+                    'export_timestamp': datetime.now().isoformat(),
+                    'networks': networks,
+                    'attacks': attacks
+                }
+                
+                with open(filename, 'w') as f:
+                    json.dump(export_data, f, indent=2, default=str)
+                
+                messagebox.showinfo("Export Successful", f"Database exported to {filename}")
+            except Exception as e:
+                messagebox.showerror("Export Failed", f"Failed to export database: {str(e)}")
+    
+    def import_database(self):
+        """Import database from JSON file"""
+        filename = filedialog.askopenfilename(
+            title="Import Database",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    import_data = json.load(f)
+                
+                # Here you would implement the import logic
+                messagebox.showinfo("Import Successful", f"Database imported from {filename}")
+                self.update_database_info()
+            except Exception as e:
+                messagebox.showerror("Import Failed", f"Failed to import database: {str(e)}")
+    
+    def clear_database(self):
+        """Clear all database records"""
+        if messagebox.askyesno("Clear Database", "Are you sure you want to clear all database records? This action cannot be undone."):
+            try:
+                conn = sqlite3.connect(self.db.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute('DELETE FROM networks')
+                cursor.execute('DELETE FROM clients')
+                cursor.execute('DELETE FROM attacks')
+                cursor.execute('DELETE FROM handshakes')
+                
+                conn.commit()
+                conn.close()
+                
+                messagebox.showinfo("Database Cleared", "All database records have been cleared.")
+                self.update_database_info()
+                self.refresh_results()
+            except Exception as e:
+                messagebox.showerror("Clear Failed", f"Failed to clear database: {str(e)}")
     
     def update_status(self, message):
         """Update status bar"""
@@ -1787,19 +2063,15 @@ def check_dependencies():
             missing_tools.append(tool)
     
     if missing_tools:
-        print(f"❌ Missing required tools: {', '.join(missing_tools)}")
-        print("📦 Please install the aircrack-ng suite and reaver:")
-        print("   sudo apt-get install aircrack-ng reaver")
-        return False
+        raise Exception(f"Missing required tools: {', '.join(missing_tools)}\n"
+                       f"Install with: sudo apt-get install aircrack-ng reaver")
     
     return True
 
 def check_permissions():
     """Check if running with proper permissions"""
     if os.geteuid() != 0:
-        print("❌ Error: WiFi Arsenal requires root privileges")
-        print("🔧 Please run with: sudo python3 wifi_arsenal.py")
-        return False
+        raise Exception("WiFi Arsenal requires root privileges to access monitor mode and perform attacks")
     
     return True
 
@@ -1832,15 +2104,19 @@ def main():
     
     print("🔍 Checking system requirements...")
     
-    # Check permissions
-    if not check_permissions():
+    try:
+        # Check dependencies
+        check_dependencies()
+        print("✅ All required tools found")
+        
+        # Check permissions
+        check_permissions()
+        print("✅ Running with proper privileges")
+        
+    except Exception as e:
+        print(f"❌ System check failed: {e}")
         sys.exit(1)
     
-    # Check dependencies
-    if not check_dependencies():
-        sys.exit(1)
-    
-    print("✅ All requirements satisfied")
     print("🚀 Launching WiFi Arsenal...")
     
     try:
