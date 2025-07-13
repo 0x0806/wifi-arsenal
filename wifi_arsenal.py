@@ -100,9 +100,9 @@ class WiFiArsenal:
 
 
 {Fore.YELLOW}╔══════════════════════════════════════════════════════════════════════════════════╗
-║                                  WiFi Penetration Testing Suite                 ║
-║                                Developed by 0x0806                              ║
-║                                Version {self.version}                           ║
+║     WiFi Penetration Testing Suite                   ║
+║     Developed by 0x0806                              ║
+║     Version {self.version}                           ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
 {Fore.GREEN}   WiFi Security Assessment Tool
