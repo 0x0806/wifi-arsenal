@@ -642,10 +642,10 @@ class WiFiArsenal:
 ║                              No Mock Components                                   ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
-{Fore.GREEN}   🔥 FULL REAL IMPLEMENTATION FEATURES:
-    📡 Real Monitor Mode & Interface Control
+{Fore.GREEN}   FEATURES:
+    📡  Monitor Mode & Interface Control
     🎯 Authentic Network Discovery & Analysis  
-    💀 Production-Grade Handshake Capture
+    💀 Handshake Capture
     🔓 Multi-Tool Password Cracking
     🌐 Advanced Attack Implementations
     📊 Comprehensive Security Assessment{Style.RESET_ALL}
