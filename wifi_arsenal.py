@@ -1145,6 +1145,11 @@ class WiFiArsenal:
         # Load initial data
         self.refresh_interfaces()
         
+        # Check initial monitor mode status
+        if self.interface and self._check_monitor_mode_status():
+            self.monitor_btn.configure(text="Disable Monitor Mode")
+            self.status_indicator.configure(fg=ARSENAL_COLORS['success'])
+        
         # Bind events
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
@@ -1523,14 +1528,24 @@ class WiFiArsenal:
         
         if self.interface:
             self.attack_engine = ArsenalAttackEngine(self.interface)
+            # Check if interface is already in monitor mode
+            if self._check_monitor_mode_status():
+                self.monitor_btn.configure(text="Disable Monitor Mode")
+                self.status_indicator.configure(fg=ARSENAL_COLORS['success'])
+            else:
+                self.monitor_btn.configure(text="Enable Monitor Mode")
+                self.status_indicator.configure(fg=ARSENAL_COLORS['warning'])
     
     def toggle_monitor_mode(self):
-        """Toggle monitor mode"""
+        """Toggle monitor mode with proper state detection"""
         if not self.interface:
             messagebox.showerror("Error", "Please select an interface first")
             return
         
-        if not self.monitor_interface:
+        # Check current monitor mode status
+        current_monitor_status = self._check_monitor_mode_status()
+        
+        if not current_monitor_status:
             # Enable monitor mode
             self.update_status("Enabling monitor mode...")
             try:
@@ -1538,6 +1553,9 @@ class WiFiArsenal:
                 
                 if success:
                     self.monitor_interface = result
+                    # Update the interface to use monitor interface for attacks
+                    if self.attack_engine:
+                        self.attack_engine.interface = result
                     self.monitor_btn.configure(text="Disable Monitor Mode")
                     self.status_indicator.configure(fg=ARSENAL_COLORS['success'])
                     self.update_status(f"Monitor mode enabled: {self.monitor_interface}")
@@ -1549,10 +1567,14 @@ class WiFiArsenal:
         else:
             # Disable monitor mode
             try:
-                success = ArsenalNetworkInterface.disable_monitor_mode(self.monitor_interface)
+                interface_to_disable = self.monitor_interface or self.interface
+                success = ArsenalNetworkInterface.disable_monitor_mode(interface_to_disable)
                 
                 if success:
                     self.monitor_interface = None
+                    # Reset attack engine to original interface
+                    if self.attack_engine:
+                        self.attack_engine.interface = self.interface
                     self.monitor_btn.configure(text="Enable Monitor Mode")
                     self.status_indicator.configure(fg=ARSENAL_COLORS['warning'])
                     self.update_status("Monitor mode disabled")
@@ -1561,6 +1583,32 @@ class WiFiArsenal:
                     messagebox.showerror("Error", "Failed to disable monitor mode")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to disable monitor mode: {e}")
+    
+    def _check_monitor_mode_status(self):
+        """Check if interface is currently in monitor mode"""
+        try:
+            # Check if current interface or monitor interface is in monitor mode
+            interfaces_to_check = [self.interface]
+            if self.monitor_interface:
+                interfaces_to_check.append(self.monitor_interface)
+            
+            result = subprocess.run(['iwconfig'], capture_output=True, text=True, timeout=10)
+            
+            for interface in interfaces_to_check:
+                if interface in result.stdout:
+                    # Look for monitor mode indication in iwconfig output
+                    lines = result.stdout.split('\n')
+                    for i, line in enumerate(lines):
+                        if interface in line and 'IEEE 802.11' in line:
+                            # Check the next few lines for mode information
+                            for j in range(i, min(i+3, len(lines))):
+                                if 'Mode:Monitor' in lines[j]:
+                                    self.monitor_interface = interface
+                                    return True
+            
+            return False
+        except Exception:
+            return False
     
     def toggle_scan(self):
         """Toggle WiFi scanning"""
