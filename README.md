@@ -1,5 +1,5 @@
 
-# WiFi Arsenal - Advanced WiFi Penetration Testing Suite
+# WiFi Arsenal -  WiFi Penetration Testing Suite
 
 <div align="center">
 
