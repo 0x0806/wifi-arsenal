@@ -641,7 +641,7 @@ class WiFiArsenal:
 ║                                                   
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
-{Fore.GREEN}   🔥 FULL   FEATURES:
+{Fore.GREEN}   🔥 FULL FEATURES:
     📡  Monitor Mode & Interface Control
     🎯 Authentic Network Discovery & Analysis  
     💀 Production-Grade Handshake Capture
