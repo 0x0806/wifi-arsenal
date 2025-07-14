@@ -636,9 +636,9 @@ class WiFiArsenal:
 {Style.RESET_ALL}
 
 {Fore.YELLOW}╔══════════════════════════════════════════════════════════════════════════════════╗
-║                    Real WiFi Penetration Testing Suite v{self.version}                    ║
-║                         Production-Ready Implementation                           ║
-║                              No Mock Components                                   ║
+║                     WiFi Penetration Testing Suite v{self.version}                    ║
+║                                         ║
+║                                                   
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
 {Fore.GREEN}   🔥 FULL   FEATURES:
