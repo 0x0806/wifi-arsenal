@@ -39,8 +39,42 @@ except ImportError as e:
     print(f"[!] Missing required module: {e}")
     print("[*] Installing dependencies...")
     try:
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'], 
-                      check=True, capture_output=True)
+        # Install individual packages that are commonly missing
+        missing_packages = []
+        
+        try:
+            from scapy.all import *
+            from scapy.layers.dot11 import *
+        except ImportError:
+            missing_packages.append('scapy')
+        
+        try:
+            import psutil
+        except ImportError:
+            missing_packages.append('psutil')
+        
+        try:
+            import requests
+        except ImportError:
+            missing_packages.append('requests')
+        
+        try:
+            from colorama import init, Fore, Back, Style
+        except ImportError:
+            missing_packages.append('colorama')
+        
+        try:
+            import netaddr
+        except ImportError:
+            missing_packages.append('netaddr')
+        
+        if missing_packages:
+            for package in missing_packages:
+                print(f"[*] Installing {package}...")
+                subprocess.run([sys.executable, '-m', 'pip', 'install', package], 
+                              check=True, capture_output=True)
+        
+        # Re-import after installation
         from scapy.all import *
         from scapy.layers.dot11 import *
         import psutil
@@ -51,8 +85,27 @@ except ImportError as e:
         print("[+] Dependencies installed successfully")
     except (subprocess.CalledProcessError, ImportError) as install_error:
         print(f"[!] Failed to install dependencies: {install_error}")
-        print(f"[*] Try running: pip3 install -r requirements.txt")
-        sys.exit(1)
+        print(f"[*] Please install manually: pip3 install scapy psutil requests colorama netaddr")
+        # Continue with limited functionality
+        try:
+            from colorama import init, Fore, Back, Style
+            init()
+        except:
+            # Fallback color definitions if colorama fails
+            class Fore:
+                RED = '\033[31m'
+                GREEN = '\033[32m'
+                YELLOW = '\033[33m'
+                BLUE = '\033[34m'
+                MAGENTA = '\033[35m'
+                CYAN = '\033[36m'
+                WHITE = '\033[37m'
+            
+            class Back:
+                BLACK = '\033[40m'
+            
+            class Style:
+                RESET_ALL = '\033[0m'
 
 class RealWiFiScanner:
     """Real WiFi scanner with multiple detection methods"""
@@ -67,48 +120,83 @@ class RealWiFiScanner:
         """Real scanning using iwlist"""
         networks = []
         try:
+            # Check if interface is up
+            try:
+                subprocess.run(['ip', 'link', 'set', self.interface, 'up'], 
+                              capture_output=True, timeout=5)
+            except:
+                pass
+            
             result = subprocess.run(['iwlist', self.interface, 'scan'], 
                                   capture_output=True, text=True, timeout=duration)
             
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout:
                 current_network = {}
                 for line in result.stdout.split('\n'):
                     line = line.strip()
                     
                     if 'Cell' in line and 'Address:' in line:
-                        if current_network:
+                        if current_network and 'bssid' in current_network:
+                            # Add defaults for missing fields
+                            current_network.setdefault('essid', '<Hidden>')
+                            current_network.setdefault('channel', '1')
+                            current_network.setdefault('power', '-50')
+                            current_network.setdefault('privacy', 'Unknown')
+                            current_network.setdefault('beacons', '1')
+                            current_network.setdefault('first_seen', datetime.now().isoformat())
+                            current_network.setdefault('last_seen', datetime.now().isoformat())
                             networks.append(current_network)
-                        current_network = {'bssid': line.split('Address: ')[1]}
+                        
+                        address_match = re.search(r'Address: ([A-Fa-f0-9:]{17})', line)
+                        if address_match:
+                            current_network = {'bssid': address_match.group(1)}
                     
-                    elif 'ESSID:' in line:
-                        essid = line.split('ESSID:')[1].strip('"')
-                        current_network['essid'] = essid if essid else '<Hidden>'
+                    elif 'ESSID:' in line and current_network:
+                        essid_match = re.search(r'ESSID:"([^"]*)"', line)
+                        if essid_match:
+                            essid = essid_match.group(1)
+                            current_network['essid'] = essid if essid else '<Hidden>'
                     
-                    elif 'Channel:' in line:
-                        current_network['channel'] = line.split('Channel:')[1].strip()
+                    elif 'Channel:' in line and current_network:
+                        channel_match = re.search(r'Channel:(\d+)', line)
+                        if channel_match:
+                            current_network['channel'] = channel_match.group(1)
                     
-                    elif 'Signal level=' in line:
+                    elif 'Signal level=' in line and current_network:
                         signal_match = re.search(r'Signal level=(-?\d+)', line)
                         if signal_match:
                             current_network['power'] = signal_match.group(1)
                     
-                    elif 'Encryption key:' in line:
+                    elif 'Encryption key:' in line and current_network:
                         if 'off' in line:
                             current_network['privacy'] = 'Open'
                         else:
                             current_network['privacy'] = 'WEP'
                     
-                    elif 'IE: IEEE 802.11i/WPA2' in line:
+                    elif 'IE: IEEE 802.11i/WPA2' in line and current_network:
                         current_network['privacy'] = 'WPA2'
                     
-                    elif 'IE: WPA Version' in line:
+                    elif 'IE: WPA Version' in line and current_network:
                         current_network['privacy'] = 'WPA'
                 
-                if current_network:
+                # Add the last network
+                if current_network and 'bssid' in current_network:
+                    current_network.setdefault('essid', '<Hidden>')
+                    current_network.setdefault('channel', '1')
+                    current_network.setdefault('power', '-50')
+                    current_network.setdefault('privacy', 'Unknown')
+                    current_network.setdefault('beacons', '1')
+                    current_network.setdefault('first_seen', datetime.now().isoformat())
+                    current_network.setdefault('last_seen', datetime.now().isoformat())
                     networks.append(current_network)
+            
+            elif result.stderr:
+                print(f"{Fore.YELLOW}[*] iwlist error: {result.stderr.strip()}{Style.RESET_ALL}")
                     
         except subprocess.TimeoutExpired:
             print(f"{Fore.YELLOW}[*] iwlist scan timed out{Style.RESET_ALL}")
+        except FileNotFoundError:
+            print(f"{Fore.RED}[!] iwlist command not found. Install wireless-tools{Style.RESET_ALL}")
         except Exception as e:
             print(f"{Fore.RED}[!] iwlist scan failed: {e}{Style.RESET_ALL}")
             
@@ -119,64 +207,97 @@ class RealWiFiScanner:
         networks = {}
         
         def packet_handler(packet):
-            if packet.haslayer(Dot11Beacon):
-                bssid = packet[Dot11].addr3
-                beacon = packet[Dot11Beacon]
-                
-                # Extract SSID
-                ssid = ""
-                try:
-                    if hasattr(beacon, 'info') and beacon.info:
-                        ssid = beacon.info.decode('utf-8', errors='ignore')
-                except:
-                    ssid = "<Hidden>"
-                
-                # Extract channel from DS Parameter Set
-                channel = "1"
-                if packet.haslayer(Dot11Elt):
-                    current = packet[Dot11Elt]
-                    while current:
-                        if current.ID == 3 and len(current.info) >= 1:
-                            channel = str(current.info[0])
-                            break
-                        current = current.payload if hasattr(current, 'payload') else None
-                
-                # Determine security
-                privacy = "Open"
-                if beacon.cap & 0x10:
-                    privacy = "WEP"
-                
-                # Check for WPA/WPA2
-                if packet.haslayer(Dot11Elt):
-                    current = packet[Dot11Elt]
-                    while current:
-                        if current.ID == 48:  # RSN Information Element
-                            privacy = "WPA2"
-                        elif current.ID == 221 and len(current.info) >= 4:
-                            if current.info[:4] == b'\x00\x50\xf2\x01':
-                                privacy = "WPA"
-                        current = current.payload if hasattr(current, 'payload') else None
-                
-                # Calculate signal strength from RadioTap
-                power = "-50"
-                if packet.haslayer(RadioTap):
-                    if hasattr(packet[RadioTap], 'dBm_AntSignal'):
-                        power = str(packet[RadioTap].dBm_AntSignal)
-                
-                networks[bssid] = {
-                    'bssid': bssid,
-                    'essid': ssid if ssid else '<Hidden>',
-                    'channel': channel,
-                    'privacy': privacy,
-                    'power': power,
-                    'beacons': '1',
-                    'first_seen': datetime.now().isoformat(),
-                    'last_seen': datetime.now().isoformat()
-                }
+            try:
+                if packet.haslayer(Dot11Beacon):
+                    bssid = packet[Dot11].addr3
+                    if not bssid:
+                        return
+                    
+                    beacon = packet[Dot11Beacon]
+                    
+                    # Extract SSID
+                    ssid = ""
+                    try:
+                        if packet.haslayer(Dot11Elt):
+                            ssid_element = packet[Dot11Elt]
+                            if ssid_element.ID == 0:  # SSID element
+                                ssid = ssid_element.info.decode('utf-8', errors='ignore')
+                    except:
+                        ssid = "<Hidden>"
+                    
+                    # Extract channel from DS Parameter Set
+                    channel = "1"
+                    if packet.haslayer(Dot11Elt):
+                        current = packet[Dot11Elt]
+                        while current and hasattr(current, 'ID'):
+                            if current.ID == 3 and hasattr(current, 'info') and len(current.info) >= 1:
+                                try:
+                                    channel = str(current.info[0])
+                                except:
+                                    channel = "1"
+                                break
+                            current = current.payload if hasattr(current, 'payload') and current.payload else None
+                    
+                    # Determine security
+                    privacy = "Open"
+                    try:
+                        if hasattr(beacon, 'cap') and beacon.cap & 0x10:
+                            privacy = "WEP"
+                    except:
+                        pass
+                    
+                    # Check for WPA/WPA2
+                    if packet.haslayer(Dot11Elt):
+                        current = packet[Dot11Elt]
+                        while current and hasattr(current, 'ID'):
+                            try:
+                                if current.ID == 48:  # RSN Information Element
+                                    privacy = "WPA2"
+                                elif current.ID == 221 and hasattr(current, 'info') and len(current.info) >= 4:
+                                    if current.info[:4] == b'\x00\x50\xf2\x01':
+                                        privacy = "WPA"
+                            except:
+                                pass
+                            current = current.payload if hasattr(current, 'payload') and current.payload else None
+                    
+                    # Calculate signal strength from RadioTap
+                    power = "-50"
+                    try:
+                        if packet.haslayer(RadioTap):
+                            radiotap = packet[RadioTap]
+                            if hasattr(radiotap, 'dBm_AntSignal'):
+                                power = str(radiotap.dBm_AntSignal)
+                            elif hasattr(radiotap, 'antenna_signal'):
+                                power = str(radiotap.antenna_signal)
+                    except:
+                        pass
+                    
+                    networks[bssid] = {
+                        'bssid': bssid,
+                        'essid': ssid if ssid else '<Hidden>',
+                        'channel': channel,
+                        'privacy': privacy,
+                        'power': power,
+                        'beacons': '1',
+                        'first_seen': datetime.now().isoformat(),
+                        'last_seen': datetime.now().isoformat()
+                    }
+            except Exception as e:
+                # Silently ignore packet parsing errors to avoid spam
+                pass
         
         try:
             print(f"[*] Starting Scapy packet capture for {duration} seconds...")
+            # Check if scapy is available
+            if 'sniff' not in globals():
+                print(f"{Fore.RED}[!] Scapy not properly imported{Style.RESET_ALL}")
+                return []
+            
             sniff(iface=self.interface, prn=packet_handler, timeout=duration, store=False)
+        except PermissionError:
+            print(f"{Fore.RED}[!] Permission denied. Run as root for raw socket access{Style.RESET_ALL}")
+        except OSError as e:
+            print(f"{Fore.RED}[!] Interface error: {e}{Style.RESET_ALL}")
         except Exception as e:
             print(f"{Fore.RED}[!] Scapy scanning failed: {e}{Style.RESET_ALL}")
         
@@ -761,6 +882,7 @@ class WiFiArsenal:
         if self.command_exists('airmon-ng'):
             try:
                 # Kill interfering processes
+                print(f"[*] Killing interfering processes...")
                 subprocess.run(['airmon-ng', 'check', 'kill'], 
                               timeout=30, capture_output=True)
                 
@@ -772,11 +894,34 @@ class WiFiArsenal:
                     # Parse monitor interface name
                     for line in result.stdout.split('\n'):
                         if 'monitor mode enabled' in line.lower():
-                            match = re.search(r'\[phy\d+\](\w+)', line)
-                            if match:
-                                self.monitor_interface = match.group(1)
+                            # Try multiple patterns to find interface name
+                            patterns = [
+                                r'\[phy\d+\](\w+)',
+                                r'on (\w+)',
+                                r'(\w+mon)',
+                                r'wlan\d+mon'
+                            ]
+                            
+                            for pattern in patterns:
+                                match = re.search(pattern, line)
+                                if match:
+                                    self.monitor_interface = match.group(1) if match.groups() else match.group(0)
+                                    print(f"{Fore.GREEN}[+] Monitor mode enabled: {self.monitor_interface}{Style.RESET_ALL}")
+                                    return True
+                    
+                    # If no specific interface found, try common monitor interface names
+                    monitor_candidates = [f"{interface}mon", "wlan0mon", "wlan1mon"]
+                    for candidate in monitor_candidates:
+                        try:
+                            result = subprocess.run(['iwconfig', candidate], 
+                                                  capture_output=True, text=True, timeout=5)
+                            if 'Mode:Monitor' in result.stdout:
+                                self.monitor_interface = candidate
                                 print(f"{Fore.GREEN}[+] Monitor mode enabled: {self.monitor_interface}{Style.RESET_ALL}")
                                 return True
+                        except:
+                            continue
+                            
             except Exception as e:
                 print(f"{Fore.YELLOW}[*] airmon-ng failed: {e}{Style.RESET_ALL}")
         
@@ -793,9 +938,10 @@ class WiFiArsenal:
             
             # Kill potential interfering processes
             try:
-                subprocess.run(['pkill', '-f', 'wpa_supplicant'], capture_output=True, timeout=5)
-                subprocess.run(['pkill', '-f', 'dhcpcd'], capture_output=True, timeout=5)
-                subprocess.run(['pkill', '-f', 'NetworkManager'], capture_output=True, timeout=5)
+                interfering_processes = ['wpa_supplicant', 'dhcpcd', 'NetworkManager', 'wpa_cli']
+                for process in interfering_processes:
+                    subprocess.run(['pkill', '-f', process], capture_output=True, timeout=5)
+                time.sleep(2)  # Give processes time to die
             except:
                 pass
             
@@ -811,21 +957,32 @@ class WiFiArsenal:
                     print(f"{Fore.YELLOW}[*] Interface down attempt {attempt + 1} timed out{Style.RESET_ALL}")
                     if attempt == 2:
                         print(f"{Fore.RED}[!] Failed to bring interface down after 3 attempts{Style.RESET_ALL}")
-                        return False
-            
-            # Set monitor mode with retry
-            for attempt in range(3):
-                try:
-                    result = subprocess.run(['iw', 'dev', interface, 'set', 'type', 'monitor'], 
-                                          capture_output=True, timeout=10)
-                    if result.returncode == 0:
+                        # Try to continue anyway
                         break
-                    time.sleep(2)
-                except subprocess.TimeoutExpired:
-                    print(f"{Fore.YELLOW}[*] Monitor mode attempt {attempt + 1} timed out{Style.RESET_ALL}")
-                    if attempt == 2:
-                        print(f"{Fore.RED}[!] Failed to set monitor mode after 3 attempts{Style.RESET_ALL}")
-                        return False
+            
+            # Set monitor mode with retry using multiple methods
+            monitor_commands = [
+                ['iw', 'dev', interface, 'set', 'type', 'monitor'],
+                ['iwconfig', interface, 'mode', 'monitor']
+            ]
+            
+            success = False
+            for cmd in monitor_commands:
+                for attempt in range(3):
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, timeout=10)
+                        if result.returncode == 0:
+                            success = True
+                            break
+                        time.sleep(1)
+                    except subprocess.TimeoutExpired:
+                        if attempt == 2:
+                            print(f"{Fore.YELLOW}[*] Command {' '.join(cmd)} timed out{Style.RESET_ALL}")
+                    except FileNotFoundError:
+                        print(f"{Fore.YELLOW}[*] Command {cmd[0]} not found{Style.RESET_ALL}")
+                        break
+                if success:
+                    break
             
             # Bring interface up with retry
             for attempt in range(3):
@@ -838,23 +995,27 @@ class WiFiArsenal:
                 except subprocess.TimeoutExpired:
                     print(f"{Fore.YELLOW}[*] Interface up attempt {attempt + 1} timed out{Style.RESET_ALL}")
                     if attempt == 2:
-                        print(f"{Fore.RED}[!] Failed to bring interface up after 3 attempts{Style.RESET_ALL}")
-                        return False
+                        # Try alternative method
+                        try:
+                            subprocess.run(['ifconfig', interface, 'up'], capture_output=True, timeout=10)
+                        except:
+                            pass
             
-            # Verify monitor mode
-            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, timeout=10)
-            if 'Mode:Monitor' in result.stdout:
-                self.monitor_interface = interface
-                print(f"{Fore.GREEN}[+] Manual monitor mode enabled: {self.monitor_interface}{Style.RESET_ALL}")
-                return True
-            else:
-                # Alternative verification
-                result = subprocess.run(['iw', 'dev', interface, 'info'], 
-                                      capture_output=True, text=True, timeout=10)
-                if 'type monitor' in result.stdout:
-                    self.monitor_interface = interface
-                    print(f"{Fore.GREEN}[+] Monitor mode enabled (verified with iw): {self.monitor_interface}{Style.RESET_ALL}")
-                    return True
+            # Verify monitor mode with multiple methods
+            verification_commands = [
+                ['iwconfig', interface],
+                ['iw', 'dev', interface, 'info']
+            ]
+            
+            for cmd in verification_commands:
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                    if ('Mode:Monitor' in result.stdout or 'type monitor' in result.stdout):
+                        self.monitor_interface = interface
+                        print(f"{Fore.GREEN}[+] Manual monitor mode enabled: {self.monitor_interface}{Style.RESET_ALL}")
+                        return True
+                except:
+                    continue
         
         except Exception as e:
             print(f"{Fore.RED}[!] Manual setup failed: {e}{Style.RESET_ALL}")
@@ -864,31 +1025,53 @@ class WiFiArsenal:
             print(f"[*] Attempting rfkill unblock...")
             subprocess.run(['rfkill', 'unblock', 'wifi'], capture_output=True, timeout=10)
             subprocess.run(['rfkill', 'unblock', 'all'], capture_output=True, timeout=10)
+            time.sleep(2)
             
             # Try again with basic setup
-            subprocess.run(['ifconfig', interface, 'down'], capture_output=True, timeout=10)
-            subprocess.run(['iwconfig', interface, 'mode', 'monitor'], capture_output=True, timeout=10)
-            subprocess.run(['ifconfig', interface, 'up'], capture_output=True, timeout=10)
-            
-            # Verify
-            result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, timeout=10)
-            if 'Mode:Monitor' in result.stdout:
-                self.monitor_interface = interface
-                print(f"{Fore.GREEN}[+] Monitor mode enabled with rfkill: {self.monitor_interface}{Style.RESET_ALL}")
-                return True
+            for cmd_set in [
+                [['ifconfig', interface, 'down'], ['iwconfig', interface, 'mode', 'monitor'], ['ifconfig', interface, 'up']],
+                [['ip', 'link', 'set', interface, 'down'], ['iw', 'dev', interface, 'set', 'type', 'monitor'], ['ip', 'link', 'set', interface, 'up']]
+            ]:
+                try:
+                    for cmd in cmd_set:
+                        subprocess.run(cmd, capture_output=True, timeout=10)
+                    
+                    # Verify
+                    result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, timeout=10)
+                    if 'Mode:Monitor' in result.stdout:
+                        self.monitor_interface = interface
+                        print(f"{Fore.GREEN}[+] Monitor mode enabled with rfkill: {self.monitor_interface}{Style.RESET_ALL}")
+                        return True
+                except:
+                    continue
         except Exception as e:
             print(f"{Fore.YELLOW}[*] rfkill method failed: {e}{Style.RESET_ALL}")
         
         # Method 4: Fallback - use interface in managed mode for basic scanning
         print(f"{Fore.YELLOW}[*] Monitor mode failed, attempting limited managed mode operation...{Style.RESET_ALL}")
         try:
-            subprocess.run(['ifconfig', interface, 'up'], capture_output=True, timeout=10)
-            self.monitor_interface = interface
-            print(f"{Fore.YELLOW}[+] Using interface in managed mode (limited functionality): {self.monitor_interface}{Style.RESET_ALL}")
-            return True
+            # Ensure interface is up
+            up_commands = [
+                ['ifconfig', interface, 'up'],
+                ['ip', 'link', 'set', interface, 'up']
+            ]
+            
+            for cmd in up_commands:
+                try:
+                    subprocess.run(cmd, capture_output=True, timeout=10)
+                    # Check if interface is actually up
+                    result = subprocess.run(['ip', 'link', 'show', interface], 
+                                          capture_output=True, text=True, timeout=5)
+                    if 'state UP' in result.stdout or 'UP' in result.stdout:
+                        self.monitor_interface = interface
+                        print(f"{Fore.YELLOW}[+] Using interface in managed mode (limited functionality): {self.monitor_interface}{Style.RESET_ALL}")
+                        return True
+                except:
+                    continue
         except:
             pass
         
+        print(f"{Fore.RED}[!] All monitor mode setup methods failed{Style.RESET_ALL}")
         return False
 
     def stop_monitor_mode(self):
@@ -984,41 +1167,63 @@ class WiFiArsenal:
         """Parse airodump-ng CSV output"""
         networks = []
         try:
+            if not os.path.exists(csv_file):
+                print(f"{Fore.RED}[!] CSV file not found: {csv_file}{Style.RESET_ALL}")
+                return networks
+            
             with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
             
+            if not lines:
+                print(f"{Fore.YELLOW}[*] CSV file is empty{Style.RESET_ALL}")
+                return networks
+            
             in_networks = False
             for line in lines:
-                if 'BSSID' in line and 'ESSID' in line:
-                    in_networks = True
-                    continue
-                
-                if in_networks and line.strip() and not line.startswith('Station MAC'):
-                    parts = [p.strip() for p in line.split(',')]
-                    if len(parts) >= 14:
-                        try:
+                try:
+                    if 'BSSID' in line and 'ESSID' in line:
+                        in_networks = True
+                        continue
+                    
+                    if in_networks and line.strip() and not line.startswith('Station MAC'):
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 14:
+                            # Validate BSSID format
+                            bssid = parts[0].strip()
+                            if not re.match(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$', bssid):
+                                continue
+                            
                             network = {
-                                'bssid': parts[0],
-                                'first_seen': parts[1],
-                                'last_seen': parts[2],
-                                'channel': parts[3] if parts[3].isdigit() else '1',
-                                'speed': parts[4],
-                                'privacy': parts[5],
-                                'cipher': parts[6],
-                                'auth': parts[7],
-                                'power': parts[8] if parts[8].lstrip('-').isdigit() else '-100',
-                                'beacons': parts[9] if parts[9].isdigit() else '0',
-                                'iv': parts[10] if parts[10].isdigit() else '0',
-                                'lan_ip': parts[11],
-                                'id_length': parts[12],
-                                'essid': parts[13] if len(parts) > 13 else 'Hidden'
+                                'bssid': bssid,
+                                'first_seen': parts[1] if parts[1] else datetime.now().isoformat(),
+                                'last_seen': parts[2] if parts[2] else datetime.now().isoformat(),
+                                'channel': parts[3] if parts[3].strip().isdigit() else '1',
+                                'speed': parts[4] if parts[4] else '0',
+                                'privacy': parts[5] if parts[5] else 'Unknown',
+                                'cipher': parts[6] if parts[6] else 'Unknown',
+                                'auth': parts[7] if parts[7] else 'Unknown',
+                                'power': parts[8] if parts[8] and (parts[8].lstrip('-').isdigit() or parts[8].strip() == '') else '-100',
+                                'beacons': parts[9] if parts[9] and parts[9].isdigit() else '0',
+                                'iv': parts[10] if parts[10] and parts[10].isdigit() else '0',
+                                'lan_ip': parts[11] if parts[11] else '',
+                                'id_length': parts[12] if parts[12] else '0',
+                                'essid': parts[13] if len(parts) > 13 and parts[13].strip() else '<Hidden>'
                             }
+                            
+                            # Clean up ESSID
+                            essid = network['essid'].strip()
+                            if essid in ['', ' ']:
+                                network['essid'] = '<Hidden>'
+                            
                             networks.append(network)
-                        except:
-                            continue
-                elif 'Station MAC' in line:
-                    break
+                    elif 'Station MAC' in line:
+                        break
+                except Exception as line_error:
+                    # Skip malformed lines
+                    continue
         
+        except FileNotFoundError:
+            print(f"{Fore.RED}[!] CSV file not found: {csv_file}{Style.RESET_ALL}")
         except Exception as e:
             print(f"{Fore.RED}[!] Error parsing CSV: {e}{Style.RESET_ALL}")
         
@@ -1135,25 +1340,47 @@ class WiFiArsenal:
         print("-" * 90)
         
         for i, network in enumerate(networks):
-            essid = network['essid'] if network['essid'] not in ['', ' ', 'Hidden'] else f"{Fore.YELLOW}<Hidden>{Style.RESET_ALL}"
-            
-            analysis = network.get('security_analysis', {})
-            risk = analysis.get('risk_level', 'Unknown')
-            vectors = len(network.get('attack_vectors', []))
-            
-            # Color coding
-            if risk == 'Critical':
-                risk_color = Fore.RED
-            elif risk == 'High':
-                risk_color = Fore.YELLOW
-            elif risk == 'Medium':
-                risk_color = Fore.CYAN
-            else:
-                risk_color = Fore.GREEN
-            
-            print(f"{i+1:<3} {essid:<20} {network['bssid']:<18} "
-                  f"{network['channel']:<3} {network['power']:<4} "
-                  f"{network['privacy']:<10} {risk_color}{risk:<8}{Style.RESET_ALL} {vectors:<8}")
+            try:
+                # Safe access to network fields with defaults
+                essid = network.get('essid', '<Unknown>')
+                bssid = network.get('bssid', 'Unknown')
+                channel = network.get('channel', '?')
+                power = network.get('power', '?')
+                privacy = network.get('privacy', 'Unknown')
+                
+                # Handle hidden/empty ESSID
+                if essid in ['', ' ', 'Hidden', '<Hidden>', None]:
+                    essid_display = f"{Fore.YELLOW}<Hidden>{Style.RESET_ALL}"
+                else:
+                    # Truncate long SSIDs
+                    if len(essid) > 18:
+                        essid_display = essid[:15] + "..."
+                    else:
+                        essid_display = essid
+                
+                analysis = network.get('security_analysis', {})
+                risk = analysis.get('risk_level', 'Unknown')
+                vectors = len(network.get('attack_vectors', []))
+                
+                # Color coding for risk level
+                if risk == 'Critical':
+                    risk_color = Fore.RED
+                elif risk == 'High':
+                    risk_color = Fore.YELLOW
+                elif risk == 'Medium':
+                    risk_color = Fore.CYAN
+                else:
+                    risk_color = Fore.GREEN
+                
+                # Ensure proper spacing and handle None values
+                print(f"{i+1:<3} {essid_display:<20} {bssid:<18} "
+                      f"{str(channel):<3} {str(power):<4} "
+                      f"{privacy:<10} {risk_color}{risk:<8}{Style.RESET_ALL} {vectors:<8}")
+                      
+            except Exception as e:
+                # Handle corrupted network data
+                print(f"{i+1:<3} {'<Error>':<20} {'Unknown':<18} {'?':<3} {'?':<4} {'Unknown':<10} {'Unknown':<8} {'0':<8}")
+                continue
 
     def main_menu(self):
         """Enhanced main menu"""
@@ -2884,7 +3111,8 @@ if __name__ == "__main__":
         # Start main menu
         self.main_menu()
 
-if __name__ == "__main__":
+def main():
+    """Main entry point with error handling"""
     try:
         arsenal = WiFiArsenal()
         arsenal.run()
@@ -2893,4 +3121,9 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         print(f"{Fore.RED}[!] Fatal error: {e}{Style.RESET_ALL}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
+
+if __name__ == "__main__":
+    main()
